@@ -3,8 +3,8 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    image: laravel-app-transporte
-    container_name: laravel-app-transporte
+    image: laravel-app-automacao-class
+    container_name: laravel-app-automacao-class
     working_dir: /var/www
     ports:
       - "8000:8000"
@@ -17,14 +17,14 @@ services:
       db:
         condition: service_healthy
     networks:
-      - laravel_transporte
+      - laravel_automacao-class
 
   db:
     image: mysql:8.0
-    container_name: laravel-db-transporte
+    container_name: laravel-db-automacao-class
     environment:
       MYSQL_ROOT_PASSWORD: root
-      MYSQL_DATABASE: transporte
+      MYSQL_DATABASE: automacao-class
     volumes:
       - db_data:/var/lib/mysql
     ports:
@@ -35,11 +35,11 @@ services:
       timeout: 5s
       retries: 20
     networks:
-      - laravel_transporte
+      - laravel_automacao-class
 
   phpmyadmin:
     image: phpmyadmin/phpmyadmin
-    container_name: laravel-phpmyadmin-transporte
+    container_name: laravel-phpmyadmin-automacao-class
     environment:
       PMA_HOST: db
       PMA_USER: root
@@ -50,7 +50,7 @@ services:
       db:
         condition: service_healthy
     networks:
-      - laravel_transporte
+      - laravel_automacao-class
 
 volumes:
   db_data:
@@ -59,5 +59,5 @@ volumes:
 
 
 networks:
-  laravel_transporte:
+  laravel_automacao-class:
     driver: bridge
