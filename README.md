@@ -14,7 +14,7 @@ A solução permite que o usuário:
 4.  **Publique a atividade** em uma ou mais turmas.
 5.  **Personalize a atribuição** da atividade para alunos específicos dentro de cada turma, com base em critérios definidos em uma planilha (como a versão anterior fazia, usando cores ou IDs para exclusão/inclusão).
 
-A principal melhoria em relação à versão anterior (AppScript) é a migração para uma arquitetura **Laravel + FilamentPHP**, que proporciona:
+A principal melhoria é a migração para uma arquitetura **Laravel + FilamentPHP**, que proporciona:
 
 *   **Interface Administrativa Completa:** Utilização do Filament para um painel de controle moderno e fácil de usar.
 *   **Escalabilidade e Performance:** Benefícios de um framework PHP robusto para lidar com mais dados e requisições.
@@ -33,7 +33,6 @@ Certifique-se de que seu ambiente de desenvolvimento atenda aos seguintes requis
 
 *   **PHP:** Versão 8.2 ou superior.
 *   **Composer:** Gerenciador de dependências para PHP.
-*   **Node.js e NPM/Yarn:** Para compilação de assets do frontend (embora o Filament cuide da maior parte).
 *   **Banco de Dados:** Um SGBD compatível com Laravel (MySQL, PostgreSQL, SQLite, etc.).
 *   **Google Cloud Project:** Necessário para obter credenciais de API para o Google Classroom e Login Social.
 
