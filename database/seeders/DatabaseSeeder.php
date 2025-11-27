@@ -39,10 +39,6 @@ class DatabaseSeeder extends Seeder
             'Criar Séries',
             'Editar Séries',
             'Excluir Séries',
-            'Listar Veículos',
-            'Criar Veículos',
-            'Editar Veículos',
-            'Excluir Veículos',
             'Listar Escolas',
             'Criar Escolas',
             'Editar Escolas',
@@ -55,10 +51,10 @@ class DatabaseSeeder extends Seeder
             'Criar Alunos',
             'Editar Alunos',
             'Excluir Alunos',
-            'Listar Rotas',
-            'Criar Rotas',
-            'Editar Rotas',
-            'Excluir Rotas',
+            'Listar Professores',
+            'Criar Professores',
+            'Editar Professores',
+            'Excluir Professores',
         ];
 
         $secretarioPermissionsList = [
