@@ -14,12 +14,10 @@ class GoogleAccount extends Model
         'access_token',
         'refresh_token',
         'token_expires_at',
-        'is_main',
     ];
 
     protected $casts = [
         'token_expires_at' => 'datetime',
-        'is_main' => 'boolean',
     ];
 
     protected $hidden = [
@@ -29,21 +27,24 @@ class GoogleAccount extends Model
     ];
 
     /**
-     * Retorna a conta MAIN do sistema
+     * Retorna a conta mais recentemente atualizada
      */
     public static function main(): ?self
     {
-        return self::where('is_main', true)->first();
+        return self::orderByDesc('updated_at')->first();
     }
 
+    /**
+     * Verifica se existe alguma conta registrada
+     */
     public static function hasMain(): bool
     {
-        return self::where('is_main', true)->exists();
+        return self::exists();
     }
 
     public static function shouldRegisterNavigation(): bool
     {
-        return GoogleAccount::hasMain();
+        return self::hasMain();
     }
 
     /**

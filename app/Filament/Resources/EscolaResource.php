@@ -4,7 +4,7 @@ namespace App\Filament\Resources;
 
 use App\Filament\Resources\EscolaResource\Pages;
 use App\Models\Escola;
-use App\Services\EscolaService;
+use App\Services\Escola\EscolaFilamentService;
 use Filament\Forms\Form;
 use Filament\Resources\Resource;
 use Filament\Tables\Table;
@@ -16,12 +16,12 @@ class EscolaResource extends Resource
 
     public static function form(Form $form): Form
     {
-        return app(EscolaService::class)->configurarFormulario($form);
+        return app(EscolaFilamentService::class)->configurarFormulario($form);
     }
 
     public static function table(Table $table): Table
     {
-        return app(EscolaService::class)->configurarTabela($table);
+        return app(EscolaFilamentService::class)->configurarTabela($table);
     }
 
     public static function getPages(): array

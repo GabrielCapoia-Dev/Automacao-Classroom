@@ -14,10 +14,7 @@ return new class extends Migration {
             $table->longText('access_token');
             $table->longText('refresh_token')->nullable();
             $table->timestamp('token_expires_at')->nullable();
-            $table->boolean('is_main')->default(false);
             $table->timestamps();
-
-            $table->index('is_main');
         });
     }
 

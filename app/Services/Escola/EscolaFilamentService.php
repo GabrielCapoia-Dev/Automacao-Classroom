@@ -1,18 +1,17 @@
 <?php
 
-namespace App\Services;
+namespace App\Services\Escola;
 
-use App\Models\Escola;
+use App\Services\UserService;
 use Filament\Forms\Components\TextInput;
 use Filament\Forms\Form;
-use Filament\Tables\Actions\BulkActionGroup;
 use Filament\Tables\Actions\DeleteBulkAction;
 use Filament\Tables\Actions\EditAction;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Table;
 use Illuminate\Support\Facades\Auth;
 
-class EscolaService
+class EscolaFilamentService
 {
     public function configurarFormulario(Form $form): Form
     {
@@ -22,13 +21,8 @@ class EscolaService
     private function shemaFormulario(): array
     {
         return [
-            TextInput::make('google_account_id')
-                ->required()
-                ->numeric(),
             TextInput::make('nome')
                 ->required()
-                ->maxLength(255),
-            TextInput::make('classroom_course_id')
                 ->maxLength(255),
         ];
     }
@@ -68,16 +62,10 @@ class EscolaService
     private function colunasTabela(): array
     {
         return [
-            TextColumn::make('google_account_id')
-                ->numeric()
-                ->sortable(),
             TextColumn::make('nome')
                 ->searchable(),
             TextColumn::make('classroom_course_id')
-                ->searchable(),
-            TextColumn::make('created_at')
-                ->dateTime()
-                ->sortable()
+                ->searchable()
                 ->toggleable(isToggledHiddenByDefault: true),
             TextColumn::make('updated_at')
                 ->dateTime()
