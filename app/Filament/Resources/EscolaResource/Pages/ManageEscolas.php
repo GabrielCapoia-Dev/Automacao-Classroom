@@ -4,9 +4,9 @@ namespace App\Filament\Resources\EscolaResource\Pages;
 
 use App\Filament\Resources\EscolaResource;
 use Filament\Actions;
-use Filament\Resources\Pages\ListRecords;
+use Filament\Resources\Pages\ManageRecords;
 
-class ListEscolas extends ListRecords
+class ManageEscolas extends ManageRecords
 {
     protected static string $resource = EscolaResource::class;
 

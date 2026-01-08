@@ -1,14 +1,16 @@
 <?php
 
-namespace App\Services\Classroom;
+namespace App\Services;
 
 use App\Models\Escola;
+use Filament\Forms\Components\TextInput;
 use Filament\Forms\Form;
 use Filament\Tables\Actions\BulkActionGroup;
 use Filament\Tables\Actions\DeleteBulkAction;
 use Filament\Tables\Actions\EditAction;
+use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Table;
-use Google\Service\Classroom\Course;
+use Illuminate\Support\Facades\Auth;
 
 class EscolaService
 {
@@ -20,26 +22,67 @@ class EscolaService
     private function shemaFormulario(): array
     {
         return [
-            //
+            TextInput::make('google_account_id')
+                ->required()
+                ->numeric(),
+            TextInput::make('nome')
+                ->required()
+                ->maxLength(255),
+            TextInput::make('classroom_course_id')
+                ->maxLength(255),
         ];
     }
 
     public function configurarTabela(Table $table): Table
     {
         return $table
-            ->columns([
-                //
-            ])
-            ->filters([
-                //
-            ])
-            ->actions([
-                EditAction::make(),
-            ])
-            ->bulkActions([
-                BulkActionGroup::make([
-                    DeleteBulkAction::make(),
-                ]),
-            ]);
+            ->columns($this->colunasTabela())
+            ->filters($this->filtrosTabela())
+            ->actions($this->acoesTabela())
+            ->bulkActions($this->acoesEmMassaTabela());
+    }
+
+    private function acoesEmMassaTabela(): array
+    {
+        return [
+            DeleteBulkAction::make()
+                ->visible(fn() => app(UserService::class)->ehAdmin(Auth::user()))
+                ->requiresConfirmation()
+                ->label('Excluir Selecionados'),
+        ];
+    }
+
+    private function acoesTabela(): array
+    {
+        return [
+            EditAction::make(),
+        ];
+    }
+    private function filtrosTabela(): array
+    {
+        return [
+            //
+        ];
+    }
+
+    private function colunasTabela(): array
+    {
+        return [
+            TextColumn::make('google_account_id')
+                ->numeric()
+                ->sortable(),
+            TextColumn::make('nome')
+                ->searchable(),
+            TextColumn::make('classroom_course_id')
+                ->searchable(),
+            TextColumn::make('created_at')
+                ->dateTime()
+                ->sortable()
+                ->toggleable(isToggledHiddenByDefault: true),
+            TextColumn::make('updated_at')
+                ->dateTime()
+                ->sortable()
+                ->toggleable(isToggledHiddenByDefault: true),
+        ];
     }
 }
