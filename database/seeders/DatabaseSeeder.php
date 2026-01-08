@@ -73,9 +73,7 @@ class DatabaseSeeder extends Seeder
         ];
 
         $usuarioPermissionsList = [
-            'Listar Turmas',
-            'Listar Alunos',
-            'Editar Alunos',
+            'Listar Usuários',
         ];
 
         $password = "Senha@123";
