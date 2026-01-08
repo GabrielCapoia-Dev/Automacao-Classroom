@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Middleware\GoogleMainConnected;
 use App\Http\Middleware\ValidaUser;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
@@ -14,6 +15,7 @@ return Application::configure(basePath: dirname(__DIR__))
     ->withMiddleware(function (Middleware $middleware) {
         $middleware->alias([
             'valida.user' => ValidaUser::class,
+            'google.main' => GoogleMainConnected::class,
         ]);
     })
     ->withExceptions(function (Exceptions $exceptions) {
