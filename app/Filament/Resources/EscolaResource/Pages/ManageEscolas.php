@@ -5,7 +5,9 @@ namespace App\Filament\Resources\EscolaResource\Pages;
 use App\Filament\Resources\EscolaResource;
 use App\Models\Escola;
 use App\Services\Escola\EscolaService;
+use App\Services\Escola\EscolaSyncService;
 use Filament\Actions;
+use Filament\Notifications\Notification;
 use Filament\Resources\Pages\ManageRecords;
 
 class ManageEscolas extends ManageRecords
@@ -15,9 +17,15 @@ class ManageEscolas extends ManageRecords
     protected function getHeaderActions(): array
     {
         return [
-            Actions\CreateAction::make()
-                ->using(function (array $data) {
-                    return app(EscolaService::class)->create($data);
+            Actions\Action::make('importar')
+                ->label('Importar Escola')
+                ->action(function () {
+                    app(EscolaSyncService::class)->syncEscolas();
+
+                    Notification::make()
+                        ->title('Sincronização concluída')
+                        ->success()
+                        ->send();
                 }),
         ];
     }

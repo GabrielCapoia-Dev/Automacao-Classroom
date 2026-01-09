@@ -103,8 +103,8 @@ class GoogleMainService
 
 
         $client->setAccessToken([
-            'access_token'  => decrypt($account->access_token),
-            'refresh_token' => $account->refresh_token ? decrypt($account->refresh_token) : null,
+            'access_token'  => $account->access_token,
+            'refresh_token' => $account->refresh_token,
             'expires_in'    => $account->token_expires_at
                 ? $account->token_expires_at->timestamp - time()
                 : 3600,
@@ -125,8 +125,8 @@ class GoogleMainService
             ]);
 
             $client->setAccessToken([
-                'access_token'  => decrypt($account->access_token),
-                'refresh_token' => decrypt($account->refresh_token),
+                'access_token'  => $account->access_token,
+                'refresh_token' => $account->refresh_token,
                 'expires_in'    => $account->token_expires_at->timestamp - time(),
                 'created'       => time(),
             ]);

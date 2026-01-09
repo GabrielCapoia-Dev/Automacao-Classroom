@@ -39,17 +39,12 @@ class EscolaFilamentService
     private function acoesEmMassaTabela(): array
     {
         return [
-            DeleteBulkAction::make()
-                ->visible(fn() => app(UserService::class)->ehAdmin(Auth::user()))
-                ->requiresConfirmation()
-                ->label('Excluir Selecionados'),
         ];
     }
 
     private function acoesTabela(): array
     {
         return [
-            EditAction::make(),
         ];
     }
     private function filtrosTabela(): array
