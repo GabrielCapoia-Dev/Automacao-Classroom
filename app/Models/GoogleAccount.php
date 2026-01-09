@@ -27,11 +27,23 @@ class GoogleAccount extends Model
     ];
 
     /**
-     * Retorna a conta mais recentemente atualizada
+     * Retorna a conta mais recentemente atualizada e valida o token.
+     * Se o token expirou, retorna null.
      */
     public static function main(): ?self
     {
-        return self::orderByDesc('updated_at')->first();
+        $account = self::orderByDesc('updated_at')->first();
+
+        if (! $account) {
+            return null;
+        }
+
+        // Verifica se o token ainda é válido
+        if (! $account->token_expires_at || $account->token_expires_at->isPast()) {
+            return null; // token expirado, considera não conectada
+        }
+
+        return $account;
     }
 
     /**
