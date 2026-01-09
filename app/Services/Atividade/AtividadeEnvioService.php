@@ -307,20 +307,17 @@ class AtividadeEnvioService
                 $courseWork->setWorkType('ASSIGNMENT');
                 $courseWork->setTopicId($turmaPrincipal->classroom_topic_id);
 
+
                 if (!empty($arquivos)) {
                     $materials = [];
 
                     foreach ($arquivos as $arquivo) {
-                        /**
-                         * @var mixed
-                         */
-                        $driveFile = new DriveFile();
-                        $driveFile->setId($arquivo['id']); // ID do arquivo no Drive
-                        $driveFile->setTitle($arquivo['nome']);
-                        $driveFile->setShareMode('STUDENT_COPY'); // 🔥 ESSENCIAL
+                        $sharedDriveFile = new SharedDriveFile();
+                        $sharedDriveFile->setDriveFileId($arquivo['id']); // ✅ CORRETO
+                        $sharedDriveFile->setShareMode('STUDENT_COPY');   // ✅ ÚNICO LUGAR VÁLIDO
 
                         $material = new Material();
-                        $material->setDriveFile($driveFile);
+                        $material->setDriveFile($sharedDriveFile);
 
                         $materials[] = $material;
                     }
