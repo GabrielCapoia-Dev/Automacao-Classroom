@@ -53,7 +53,7 @@ class GoogleMainAuthController
             ])
             ->with([
                 'access_type' => 'offline',
-                'prompt' => 'consent',
+                'prompt' => 'consent select_account',
             ])
             ->redirect();
     }
