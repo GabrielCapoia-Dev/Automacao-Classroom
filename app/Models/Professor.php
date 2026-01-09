@@ -26,11 +26,11 @@ class Professor extends Model
 
     public function turmas()
     {
-        return $this->belongsToMany(Turma::class);
+        return $this->belongsToMany(Turma::class, 'professor_turma', 'professor_id', 'turma_id');
     }
 
     public function atividades()
     {
-        return $this->belongsToMany(Atividade::class);
+        return $this->belongsToMany(Atividade::class, 'atividade_professor', 'professor_id', 'atividade_id');
     }
 }

@@ -9,21 +9,16 @@ return new class extends Migration {
     {
         Schema::create('turmas', function (Blueprint $table) {
             $table->id();
-
-            $table->foreignId('google_account_id')
-                ->constrained('google_accounts')
-                ->cascadeOnDelete();
-
-            $table->foreignId('escola_id')
-                ->constrained('escolas')
-                ->cascadeOnDelete();
+            $table->foreignId('google_account_id')->constrained()->cascadeOnDelete();
+            $table->foreignId('escola_id')->constrained()->cascadeOnDelete();
+            $table->foreignId('serie_id')->nullable()->constrained('series')->nullOnDelete();
 
             $table->string('nome');
-            $table->string('classroom_topic_id')->nullable();
+            $table->string('classroom_topic_id');
 
             $table->timestamps();
 
-            $table->index(['google_account_id', 'escola_id']);
+            $table->unique(['classroom_topic_id', 'escola_id']);
         });
     }
 

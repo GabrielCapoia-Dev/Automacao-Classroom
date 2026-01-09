@@ -18,6 +18,10 @@ return new class extends Migration {
                 ->constrained('turmas')
                 ->cascadeOnDelete();
 
+            $table->foreignId('serie_id')
+                ->constrained('series')
+                ->cascadeOnDelete();
+
             $table->string('titulo');
             $table->text('descricao')->nullable();
             $table->string('classroom_coursework_id')->nullable();

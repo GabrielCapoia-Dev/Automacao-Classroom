@@ -12,6 +12,7 @@ class Turma extends Model
     protected $fillable = [
         'google_account_id',
         'escola_id',
+        'serie_id',
         'nome',
         'classroom_topic_id',
     ];
@@ -19,6 +20,11 @@ class Turma extends Model
     public function escola()
     {
         return $this->belongsTo(Escola::class);
+    }
+
+    public function serie()
+    {
+        return $this->belongsTo(Serie::class);
     }
 
     public function professores()

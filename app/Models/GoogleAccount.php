@@ -3,6 +3,9 @@
 namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Support\Facades\Schema;
+
+use function Symfony\Component\Translation\t;
 
 class GoogleAccount extends Model
 {
@@ -32,6 +35,10 @@ class GoogleAccount extends Model
      */
     public static function main(): ?self
     {
+        if (! Schema::hasTable('google_accounts')) {
+            return null;
+        }
+
         $account = self::orderByDesc('updated_at')->first();
 
         if (! $account) {
@@ -46,19 +53,11 @@ class GoogleAccount extends Model
         return $account;
     }
 
-    /**
-     * Verifica se existe alguma conta registrada
-     */
     public static function hasMain(): bool
     {
-        return self::exists();
+        return self::main() !== null;
     }
-
-    public static function shouldRegisterNavigation(): bool
-    {
-        return self::hasMain();
-    }
-
+    
     /**
      * Indica se o token está expirado
      */

@@ -24,5 +24,9 @@ class Escola extends Model
     {
         return $this->hasMany(Turma::class);
     }
-}
 
+    public function atividades()
+    {
+        return $this->belongsToMany(Atividade::class, 'atividade_escola')->withPivot('classroom_coursework_id')->withTimestamps();
+    }
+}

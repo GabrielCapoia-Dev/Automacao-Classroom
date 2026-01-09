@@ -72,6 +72,7 @@ class EscolaSyncService
     protected function syncTurmasDaEscola(Classroom $classroom, Escola $escola): void
     {
         $pageToken = null;
+        $mainAccountId = $this->googleService->getMainAccount()->id;
 
         do {
             $response = $classroom->courses_topics->listCoursesTopics(
@@ -86,13 +87,33 @@ class EscolaSyncService
             $topics = $response->getTopic() ?? [];
 
             foreach ($topics as $topic) {
+                $nomeTurma = trim($topic->getName());
+
+                if ($nomeTurma === '') {
+                    continue;
+                }
+
+                // 1️⃣ normaliza nome da série
+                $serieNome = $this->normalizeSerieName($nomeTurma);
+
+                // 2️⃣ cria ou recupera a série COM google_account_id
+                $serie = \App\Models\Serie::firstOrCreate(
+                    [
+                        'google_account_id' => $mainAccountId,
+                        'nome' => $serieNome
+                    ]
+                );
+
+                // 3️⃣ cria ou atualiza a turma vinculando à série
                 Turma::updateOrCreate(
                     [
                         'classroom_topic_id' => $topic->getTopicId(),
                         'escola_id' => $escola->id,
                     ],
                     [
-                        'nome' => $topic->getName(),
+                        'google_account_id' => $mainAccountId,
+                        'nome' => $nomeTurma,
+                        'serie_id' => $serie->id,
                     ]
                 );
             }
@@ -100,6 +121,7 @@ class EscolaSyncService
             $pageToken = $response->getNextPageToken();
         } while ($pageToken);
     }
+
 
     /**
      * Centraliza a criação do client Classroom
@@ -109,5 +131,10 @@ class EscolaSyncService
         $client = $this->googleService->getGoogleClient();
 
         return app(Classroom::class, ['client' => $client]);
+    }
+
+    protected function normalizeSerieName(string $name): string
+    {
+        return mb_strtoupper(trim($name));
     }
 }
