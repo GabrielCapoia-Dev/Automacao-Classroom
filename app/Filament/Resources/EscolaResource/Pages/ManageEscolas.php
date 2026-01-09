@@ -18,7 +18,7 @@ class ManageEscolas extends ManageRecords
     {
         return [
             Actions\Action::make('importar')
-                ->label('Importar Escola')
+                ->label('Importar')
                 ->action(function () {
                     app(EscolaSyncService::class)->syncEscolas();
 

@@ -8,11 +8,16 @@ use App\Services\Escola\EscolaFilamentService;
 use Filament\Forms\Form;
 use Filament\Resources\Resource;
 use Filament\Tables\Table;
+
 class EscolaResource extends Resource
 {
     protected static ?string $model = Escola::class;
 
-    protected static ?string $navigationIcon = 'heroicon-o-rectangle-stack';
+    protected static ?string $navigationIcon = 'heroicon-o-building-library';
+    public static ?string $modelLabel = 'Escola';
+    protected static ?string $navigationGroup = "Rotinas";
+    public static ?string $pluralModelLabel = 'Escolas';
+    public static ?string $slug = 'escolas';
 
     public static function form(Form $form): Form
     {

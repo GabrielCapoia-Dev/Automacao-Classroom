@@ -22,6 +22,9 @@ class GoogleMainAuthController
                 'https://www.googleapis.com/auth/classroom.courses',
                 'https://www.googleapis.com/auth/classroom.courses.readonly',
 
+                'https://www.googleapis.com/auth/classroom.topics',
+                'https://www.googleapis.com/auth/classroom.topics.readonly',
+
                 // Atividades
                 'https://www.googleapis.com/auth/classroom.coursework.students',
                 'https://www.googleapis.com/auth/classroom.coursework.students.readonly',

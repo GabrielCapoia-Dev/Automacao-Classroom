@@ -13,10 +13,16 @@ class Professor extends Model
 
     protected $fillable = [
         'google_account_id',
+        'escola_id',
         'nome',
         'email',
         'classroom_user_id',
     ];
+
+    public function escola()
+    {
+        return $this->belongsTo(Escola::class);
+    }
 
     public function turmas()
     {

@@ -9,16 +9,15 @@ class Escola extends Model
 {
     use BelongsToGoogleAccount;
 
-
     protected $fillable = [
         'google_account_id',
         'nome',
         'classroom_course_id',
     ];
 
-    public function googleAccount()
+    public function professores()
     {
-        return $this->belongsTo(GoogleAccount::class);
+        return $this->hasMany(Professor::class);
     }
 
     public function turmas()
