@@ -15,6 +15,7 @@ return new class extends Migration {
                 ->cascadeOnDelete();
 
             $table->foreignId('turma_id')
+                ->nullable() // ✅ NULLABLE
                 ->constrained('turmas')
                 ->cascadeOnDelete();
 
@@ -23,12 +24,20 @@ return new class extends Migration {
                 ->cascadeOnDelete();
 
             $table->string('titulo');
+            $table->string('titulo_original')->nullable();
+            $table->integer('numero_parte')->default(1);
+            $table->integer('total_partes')->default(1);
             $table->text('descricao')->nullable();
             $table->string('classroom_coursework_id')->nullable();
+            
+            // ✅ Campos do Drive
+            $table->string('drive_folder_id')->nullable();
+            $table->string('drive_folder_url')->nullable();
 
             $table->timestamps();
 
             $table->index(['google_account_id', 'turma_id']);
+            $table->index(['titulo_original', 'serie_id', 'numero_parte']);
         });
     }
 

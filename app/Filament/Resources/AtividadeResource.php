@@ -6,6 +6,7 @@ use App\Filament\Resources\AtividadeResource\Pages;
 use App\Filament\Resources\AtividadeResource\RelationManagers;
 use App\Models\Atividade;
 use App\Models\GoogleAccount;
+use App\Models\Professor;
 use App\Models\Serie;
 use Filament\Forms;
 use App\Services\GoogleDriveService;
@@ -105,8 +106,14 @@ class AtividadeResource extends Resource
 
                                                         $folderId = $matches[1];
 
+                                                        $set('drive_folder_id', $folderId);
+                                                        $set('drive_folder_url', $url);
+
                                                         // Cria o serviço e busca os arquivos
                                                         $driveService = new GoogleDriveService();
+                                                        $arquivos = $driveService->listarArquivos($folderId);
+
+                                                        $set('arquivos_drive', $arquivos);
 
                                                         if (!$driveService->validarFolderId($folderId)) {
                                                             throw new \Exception('Pasta não encontrada ou sem permissão de acesso.');
@@ -315,51 +322,37 @@ class AtividadeResource extends Resource
     public static function table(Table $table): Table
     {
         return $table
+            ->modifyQueryUsing(fn($query) => $query->apenasAtividadesPrincipais()) // ✅ Filtra apenas parte 1
             ->columns([
-                Tables\Columns\TextColumn::make('titulo')
+                Tables\Columns\TextColumn::make('titulo_original')
+                    ->label('Título')
                     ->searchable()
                     ->sortable()
-                    ->weight('bold'),
+                    ->weight('bold')
+                    ->default(fn($record) => $record->titulo), // Fallback para atividades antigas
+
+                Tables\Columns\TextColumn::make('total_partes')
+                    ->label('Partes')
+                    ->badge()
+                    ->color('info')
+                    ->formatStateUsing(fn($state) => $state > 1 ? "{$state} partes" : '1 parte')
+                    ->alignCenter(),
 
                 Tables\Columns\TextColumn::make('serie.nome')
                     ->label('Série')
                     ->sortable()
                     ->badge()
                     ->color('info')
-                    ->searchable()
-                    ->sortable(),
-
-                Tables\Columns\TextColumn::make('escolas')
-                    ->label('Escolas')
-                    ->badge()
-                    ->separator(',')
-                    ->formatStateUsing(
-                        fn($record) =>
-                        $record->escolas->pluck('nome')->join(', ')
-                    )
-                    ->color('success')
-                    ->wrap(),
-
-                Tables\Columns\TextColumn::make('professores')
-                    ->label('Professores')
-                    ->badge()
-                    ->separator(',')
-                    ->formatStateUsing(
-                        fn($record) =>
-                        $record->professores->pluck('nome')->join(', ')
-                    )
-                    ->color('warning')
-                    ->wrap()
-                    ->limit(50),
+                    ->searchable(),
 
                 Tables\Columns\TextColumn::make('escolas_count')
-                    ->label('Escolas')
+                    ->label('Nº Escolas')
                     ->counts('escolas')
                     ->alignCenter()
                     ->sortable(),
 
                 Tables\Columns\TextColumn::make('professores_count')
-                    ->label('Professores')
+                    ->label('Nº Professores')
                     ->counts('professores')
                     ->alignCenter()
                     ->sortable(),
@@ -369,12 +362,6 @@ class AtividadeResource extends Resource
                     ->dateTime('d/m/Y H:i')
                     ->sortable()
                     ->toggleable(),
-
-                Tables\Columns\TextColumn::make('updated_at')
-                    ->label('Atualizado em')
-                    ->dateTime('d/m/Y H:i')
-                    ->sortable()
-                    ->toggleable(isToggledHiddenByDefault: true),
             ])
             ->filters([
                 Tables\Filters\SelectFilter::make('serie')
@@ -389,10 +376,300 @@ class AtividadeResource extends Resource
                     ->searchable()
                     ->preload(),
             ])
-            ->actions([])
+            ->actions([
+                Tables\Actions\Action::make('editar')
+                    ->label('Editar')
+                    ->icon('heroicon-o-pencil-square')
+                    ->color('warning')
+                    ->slideOver()
+                    ->modalWidth('5xl')
+                    ->modalHeading(fn(Atividade $record) => "Editar: {$record->titulo_original}")
+                    ->fillForm(function (Atividade $record): array {
+                        // ✅ Preenche os professores agrupados por escola
+                        $formData = [
+                            'titulo' => $record->titulo_original ?? $record->titulo,
+                            'descricao' => $record->descricao,
+                            'editar_todas_escolas_existentes' => true,
+                            'escolas_existentes_selecionadas' => [],
+                            'novas_escolas' => [],
+                        ];
+
+                        // ✅ Para cada escola, preenche seus professores
+                        foreach ($record->escolas as $escola) {
+                            $professoresDaEscola = $record->professores()
+                                ->where('escola_id', $escola->id)
+                                ->pluck('professores.id')
+                                ->toArray();
+
+                            $formData["professores_escola_{$escola->id}"] = $professoresDaEscola;
+                        }
+
+                        return $formData;
+                    })
+                    ->form(fn(Atividade $record) => [
+
+                        Forms\Components\Section::make('Editar Escolas Existentes')
+                            ->description('Escolha quais escolas que JÁ receberam esta atividade você deseja atualizar')
+                            ->schema([
+                                Forms\Components\Toggle::make('editar_todas_escolas_existentes')
+                                    ->label('Atualizar TODAS as escolas que já receberam')
+                                    ->default(true)
+                                    ->live()
+                                    ->helperText('Quando ativado, as mudanças serão aplicadas em todas as escolas que já receberam esta atividade'),
+
+                                Forms\Components\CheckboxList::make('escolas_existentes_selecionadas')
+                                    ->label('Ou selecione escolas específicas para atualizar:')
+                                    ->options(fn() => $record->escolas->pluck('nome', 'id'))
+                                    ->hidden(fn(callable $get) => $get('editar_todas_escolas_existentes'))
+                                    ->columns(2)
+                                    ->helperText('Selecione apenas as escolas que você deseja atualizar'),
+                            ]),
+
+                        Forms\Components\Section::make('Adicionar Novas Escolas')
+                            ->description('Envie esta atividade para escolas que ainda NÃO receberam')
+                            ->schema([
+                                Forms\Components\CheckboxList::make('novas_escolas')
+                                    ->label('Selecione novas escolas para receber esta atividade')
+                                    ->options(function () use ($record) {
+                                        $serieId = $record->serie_id;
+                                        $escolasQueJaReceberam = $record->escolas->pluck('id')->toArray();
+
+                                        return \App\Models\Escola::whereHas('turmas', function ($q) use ($serieId) {
+                                            $q->where('serie_id', $serieId)
+                                                ->whereHas('professores');
+                                        })
+                                            ->whereNotIn('id', $escolasQueJaReceberam)
+                                            ->whereNotNull('classroom_course_id')
+                                            ->orderBy('nome')
+                                            ->pluck('nome', 'id')
+                                            ->toArray();
+                                    })
+                                    ->live()
+                                    ->columns(2)
+                                    ->helperText('Estas escolas têm a mesma série mas ainda não receberam esta atividade')
+                                    ->afterStateUpdated(function ($state, callable $set, callable $get) use ($record) {
+                                        // ✅ Auto-seleciona professores das novas escolas
+                                        $novasEscolas = $state ?? [];
+                                        $serieId = $record->serie_id;
+
+                                        foreach ($novasEscolas as $escolaId) {
+                                            // Busca professores da escola
+                                            $professoresDaEscola = Professor::where('escola_id', $escolaId)
+                                                ->whereHas('turmas', function ($q) use ($serieId) {
+                                                    $q->where('serie_id', $serieId);
+                                                })
+                                                ->whereNotNull('classroom_user_id')
+                                                ->pluck('id')
+                                                ->toArray();
+
+                                            // Auto-seleciona todos os professores da escola
+                                            $set("professores_escola_{$escolaId}", $professoresDaEscola);
+                                        }
+                                    }),
+                            ])
+                            ->collapsible()
+                            ->visible(function () use ($record) {
+                                $serieId = $record->serie_id;
+                                $escolasQueJaReceberam = $record->escolas->pluck('id')->toArray();
+
+                                return \App\Models\Escola::whereHas('turmas', function ($q) use ($serieId) {
+                                    $q->where('serie_id', $serieId)
+                                        ->whereHas('professores');
+                                })
+                                    ->whereNotIn('id', $escolasQueJaReceberam)
+                                    ->whereNotNull('classroom_course_id')
+                                    ->exists();
+                            }),
+
+                        Forms\Components\Section::make('Atualizar Dados')
+                            ->schema([
+                                Forms\Components\TextInput::make('titulo')
+                                    ->label('Título')
+                                    ->required()
+                                    ->maxLength(255)
+                                    ->helperText('Este título será atualizado em todas as partes e escolas selecionadas'),
+
+                                Forms\Components\Textarea::make('descricao')
+                                    ->label('Descrição')
+                                    ->rows(4)
+                                    ->maxLength(65535),
+                            ]),
+
+                        Forms\Components\Section::make('Selecionar Professores')
+                            ->description('Selecione quais professores de cada escola devem receber esta atividade')
+                            ->schema(function (callable $get) use ($record) {
+                                $escolasExistentes = $record->escolas->pluck('id')->toArray();
+                                $novasEscolas = $get('novas_escolas') ?? [];
+                                $todasEscolas = array_unique(array_merge($escolasExistentes, $novasEscolas));
+                                $serieId = $record->serie_id;
+
+                                if (empty($todasEscolas)) {
+                                    return [
+                                        Forms\Components\Placeholder::make('sem_escolas')
+                                            ->label('')
+                                            ->content('Nenhuma escola disponível')
+                                    ];
+                                }
+
+                                // ✅ Cria um Fieldset para cada escola
+                                $fieldsets = [];
+
+                                $escolas = \App\Models\Escola::whereIn('id', $todasEscolas)
+                                    ->orderBy('nome')
+                                    ->get();
+
+                                foreach ($escolas as $escola) {
+                                    $professoresDaEscola = Professor::where('escola_id', $escola->id)
+                                        ->whereHas('turmas', function ($q) use ($serieId) {
+                                            $q->where('serie_id', $serieId);
+                                        })
+                                        ->whereNotNull('classroom_user_id')
+                                        ->orderBy('nome')
+                                        ->get();
+
+                                    if ($professoresDaEscola->isEmpty()) {
+                                        continue;
+                                    }
+
+                                    $isNovaEscola = in_array($escola->id, $novasEscolas);
+                                    $badge = $isNovaEscola ? ' 🆕 NOVA' : '';
+
+                                    $fieldsets[] = Forms\Components\Fieldset::make("escola_{$escola->id}")
+                                        ->label($escola->nome . $badge)
+                                        ->schema([
+                                            Forms\Components\CheckboxList::make("professores_escola_{$escola->id}")
+                                                ->label('')
+                                                ->options($professoresDaEscola->pluck('nome', 'id'))
+                                                ->columns(2)
+                                                ->columnSpanFull()
+                                                ->live()
+                                        ])
+                                        ->columnSpanFull();
+                                }
+
+                                // ✅ Campo oculto que coleta todos os professores selecionados
+                                $fieldsets[] = Forms\Components\Hidden::make('professores_ids')
+                                    ->dehydrateStateUsing(function (callable $get) use ($escolas) {
+                                        $todosProfessores = [];
+
+                                        foreach ($escolas as $escola) {
+                                            $professoresDaEscola = $get("professores_escola_{$escola->id}") ?? [];
+                                            $todosProfessores = array_merge($todosProfessores, $professoresDaEscola);
+                                        }
+
+                                        return array_unique($todosProfessores);
+                                    });
+
+                                return $fieldsets;
+                            })
+                            ->live(),
+                    ])
+                    ->action(function (Atividade $record, array $data) {
+                        try {
+                            // ✅ VALIDAÇÃO: Verifica se cada escola tem pelo menos 1 professor
+                            $escolasExistentes = $record->escolas->pluck('id')->toArray();
+                            $novasEscolas = $data['novas_escolas'] ?? [];
+                            $todasEscolas = array_unique(array_merge($escolasExistentes, $novasEscolas));
+
+                            $escolasSemProfessores = [];
+
+                            foreach ($todasEscolas as $escolaId) {
+                                $professoresDaEscola = $data["professores_escola_{$escolaId}"] ?? [];
+
+                                if (empty($professoresDaEscola)) {
+                                    $escola = \App\Models\Escola::find($escolaId);
+                                    if ($escola) {
+                                        $escolasSemProfessores[] = $escola->nome;
+                                    }
+                                }
+                            }
+
+                            if (!empty($escolasSemProfessores)) {
+                                Notification::make()
+                                    ->title('Erro de Validação')
+                                    ->body('As seguintes escolas precisam ter pelo menos 1 professor selecionado: ' . implode(', ', $escolasSemProfessores))
+                                    ->danger()
+                                    ->persistent()
+                                    ->send();
+                                return;
+                            }
+
+                            // ✅ Coleta todos os professores selecionados
+                            $todosProfessores = [];
+                            foreach ($todasEscolas as $escolaId) {
+                                $professoresDaEscola = $data["professores_escola_{$escolaId}"] ?? [];
+                                $todosProfessores = array_merge($todosProfessores, $professoresDaEscola);
+                            }
+                            $data['professores_ids'] = array_unique($todosProfessores);
+
+                            $editService = new \App\Services\Atividade\AtividadeEditService(
+                                app(\App\Services\GoogleMainService::class)
+                            );
+
+                            $todasAsPartes = $record->todasAsPartes();
+
+                            $totalSucessos = 0;
+                            $totalFalhas = 0;
+                            $novasEscolasAdicionadas = 0;
+
+                            // Adiciona novas escolas
+                            if (!empty($data['novas_escolas'])) {
+                                foreach ($todasAsPartes as $parte) {
+                                    $resultadoNovas = $editService->adicionarNovasEscolas($parte, $data['novas_escolas']);
+                                    $totalSucessos += $resultadoNovas['sucessos'];
+                                    $totalFalhas += $resultadoNovas['falhas'];
+                                    $novasEscolasAdicionadas += $resultadoNovas['sucessos'];
+                                }
+                            }
+
+                            // Atualiza escolas existentes
+                            foreach ($todasAsPartes as $parte) {
+                                $resultados = $editService->atualizarAtividade($parte, $data);
+                                $totalSucessos += $resultados['sucessos'];
+                                $totalFalhas += $resultados['falhas'];
+                            }
+
+                            $record->refresh();
+                            $record->load(['escolas', 'professores']);
+
+                            $mensagemSucesso = "Atividade atualizada em {$totalSucessos} escola(s) e {$todasAsPartes->count()} parte(s)";
+                            if ($novasEscolasAdicionadas > 0) {
+                                $mensagemSucesso .= ". {$novasEscolasAdicionadas} nova(s) escola(s) adicionada(s)";
+                            }
+
+                            if ($totalFalhas > 0) {
+                                Notification::make()
+                                    ->title('Atualização Concluída com Erros')
+                                    ->body("Sucessos: {$totalSucessos}, Falhas: {$totalFalhas}")
+                                    ->warning()
+                                    ->send();
+                            } else {
+                                Notification::make()
+                                    ->title('Sucesso!')
+                                    ->body($mensagemSucesso)
+                                    ->success()
+                                    ->send();
+                            }
+
+                            redirect()->to(request()->header('Referer'));
+                        } catch (\Exception $e) {
+                            Log::error("Erro na action de edição", [
+                                'erro' => $e->getMessage(),
+                                'trace' => $e->getTraceAsString()
+                            ]);
+
+                            Notification::make()
+                                ->title('Erro ao Atualizar')
+                                ->body($e->getMessage())
+                                ->danger()
+                                ->send();
+                        }
+                    }),
+            ])
             ->bulkActions([])
             ->defaultSort('created_at', 'desc');
     }
+
     public static function getPages(): array
     {
         return [

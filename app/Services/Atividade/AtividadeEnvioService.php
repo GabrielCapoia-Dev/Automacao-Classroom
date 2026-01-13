@@ -16,12 +16,12 @@ use Google\Service\Classroom\SharedDriveFile;
 
 class AtividadeEnvioService
 {
-    protected bool $cancelado = false;
-    protected int $maxTentativas = 3;
-    protected int $arquivosPorParte = 5;
+    public bool $cancelado = false;
+    public int $maxTentativas = 3;
+    public int $arquivosPorParte = 7;
 
     public function __construct(
-        protected GoogleMainService $googleService
+        public GoogleMainService $googleService
     ) {}
 
     public function cancelar(): void
@@ -44,7 +44,6 @@ class AtividadeEnvioService
         $escolaIds = $data['escolas'] ?? [];
         $arquivos = $data['arquivos_drive'] ?? [];
 
-        // Remove "all" e garante valores únicos
         $escolaIds = array_values(array_unique(array_filter($escolaIds, fn($id) => $id !== 'all')));
 
         Log::info('=== INICIANDO ENVIO DE ATIVIDADE ===', [
@@ -58,30 +57,12 @@ class AtividadeEnvioService
             throw new \Exception('Nenhuma escola selecionada');
         }
 
-        // Divide os arquivos em partes
         $partes = $this->dividirArquivosEmPartes($arquivos);
         $totalPartes = count($partes);
-
-        Log::info('Arquivos divididos em partes', [
-            'total_partes' => $totalPartes,
-            'arquivos_por_parte' => array_map(fn($p) => count($p), $partes)
-        ]);
-
-        // Busca turmas e professores por escola
         $escolasComDados = $this->montarDadosEnvio($escolaIds, $serieId);
 
-        Log::info('=== DADOS MONTADOS ===', [
-            'escolas_validas' => count($escolasComDados),
-            'escolas_detalhes' => array_map(fn($e) => [
-                'nome' => $e['escola']->nome,
-                'id' => $e['escola']->id,
-                'turmas' => $e['turmas']->pluck('nome')->toArray(),
-                'professores' => $e['professores']->count()
-            ], $escolasComDados)
-        ]);
-
         if (empty($escolasComDados)) {
-            throw new \Exception('Nenhuma escola válida encontrada com turmas e professores vinculados à série selecionada.');
+            throw new \Exception('Nenhuma escola válida encontrada.');
         }
 
         $resultados = [
@@ -91,15 +72,11 @@ class AtividadeEnvioService
             'sucessos' => 0,
             'falhas' => 0,
             'cancelado' => false,
-            'detalhes' => []
+            'detalhes' => [],
+            'atividades_criadas' => []
         ];
 
-        Log::info('=== INÍCIO DO ENVIO ===', [
-            'total_atividades_a_criar' => $resultados['total_envios'],
-            'estrategia' => 'Enviar todas as escolas para Parte 1, depois todas para Parte 2, etc.'
-        ]);
-
-        // Envia parte por parte para todas as escolas
+        // 🔥 CRIA UMA ATIVIDADE POR PARTE (não por escola)
         foreach ($partes as $numeroParte => $arquivosDaParte) {
             if ($this->foiCancelado()) {
                 $resultados['cancelado'] = true;
@@ -110,11 +87,30 @@ class AtividadeEnvioService
                 ? "Parte {$numeroParte} - {$titulo}"
                 : $titulo;
 
+            // ✅ CRIA UMA ÚNICA ATIVIDADE NO BANCO
+            $atividade = Atividade::create([
+                'google_account_id' => $this->googleService->getMainAccount()->id,
+                'turma_id' => null,
+                'serie_id' => $serieId,
+                'titulo' => $tituloComParte,
+                'titulo_original' => $titulo,
+                'numero_parte' => $numeroParte,
+                'total_partes' => $totalPartes,
+                'descricao' => $descricao,
+                'drive_folder_id' => $data['drive_folder_id'] ?? null,
+                'drive_folder_url' => $data['drive_folder_url'] ?? null,
+                'arquivos_parte' => $arquivosDaParte, // ✅ Salva os arquivos desta parte
+            ]);
+
             Log::info("========== INICIANDO PARTE {$numeroParte}/{$totalPartes} ==========", [
                 'titulo' => $tituloComParte,
+                'atividade_id' => $atividade->id,
                 'arquivos' => count($arquivosDaParte)
             ]);
 
+            $todosOsProfessores = [];
+
+            // Envia para cada escola
             foreach ($escolasComDados as $index => $dadosEscola) {
                 if ($this->foiCancelado()) {
                     $resultados['cancelado'] = true;
@@ -137,6 +133,18 @@ class AtividadeEnvioService
 
                 if ($resultado['sucesso']) {
                     $resultados['sucessos']++;
+
+                    // ✅ VINCULA A ESCOLA À ATIVIDADE
+                    $atividade->escolas()->attach($dadosEscola['escola']->id, [
+                        'classroom_coursework_id' => $resultado['coursework_id']
+                    ]);
+
+                    // Coleta IDs dos professores
+                    $todosOsProfessores = array_merge(
+                        $todosOsProfessores,
+                        $dadosEscola['professores']->pluck('id')->toArray()
+                    );
+
                     Log::info("  ✓ Sucesso!", ['escola' => $dadosEscola['escola']->nome]);
                 } else {
                     $resultados['falhas']++;
@@ -158,25 +166,34 @@ class AtividadeEnvioService
                     ]);
                 }
 
-                usleep(500000); // 0.5 segundo
+                usleep(500000);
             }
 
+            // ✅ VINCULA TODOS OS PROFESSORES DE UMA VEZ
+            if (!empty($todosOsProfessores)) {
+                $atividade->professores()->attach(array_unique($todosOsProfessores));
+            }
+
+            $resultados['atividades_criadas'][] = $atividade->id;
+
             Log::info("========== PARTE {$numeroParte} CONCLUÍDA ==========", [
-                'sucessos_ate_agora' => $resultados['sucessos'],
-                'falhas_ate_agora' => $resultados['falhas']
+                'atividade_id' => $atividade->id,
+                'escolas_vinculadas' => $atividade->escolas->count(),
+                'professores_vinculados' => $atividade->professores->count()
             ]);
         }
 
         Log::info('=== ENVIO FINALIZADO ===', [
             'total_sucessos' => $resultados['sucessos'],
             'total_falhas' => $resultados['falhas'],
+            'atividades_criadas' => $resultados['atividades_criadas'],
             'cancelado' => $resultados['cancelado']
         ]);
 
         return $resultados;
     }
 
-    protected function dividirArquivosEmPartes(array $arquivos): array
+    public function dividirArquivosEmPartes(array $arquivos): array
     {
         if (empty($arquivos)) {
             return [1 => []];
@@ -184,22 +201,86 @@ class AtividadeEnvioService
 
         $totalArquivos = count($arquivos);
 
+        // Se tiver 7 ou menos arquivos, retorna tudo na parte 1
         if ($totalArquivos <= $this->arquivosPorParte) {
             return [1 => $arquivos];
         }
 
-        $partes = [];
-        $numeroPartes = (int) ceil($totalArquivos / $this->arquivosPorParte);
+        // ✅ Separa arquivos prioritários (Plano de ensino)
+        $arquivosPrioritarios = [];
+        $arquivosNormais = [];
 
-        for ($i = 0; $i < $numeroPartes; $i++) {
-            $offset = $i * $this->arquivosPorParte;
-            $partes[$i + 1] = array_slice($arquivos, $offset, $this->arquivosPorParte);
+        foreach ($arquivos as $arquivo) {
+            $nome = $arquivo['nome'] ?? '';
+
+            // Verifica se contém "Plano de ensino" (case-insensitive)
+            if (stripos($nome, 'Plano de ensino') !== false) {
+                $arquivosPrioritarios[] = $arquivo;
+            } else {
+                $arquivosNormais[] = $arquivo;
+            }
         }
 
-        return $partes;
-    }
+        Log::info("Divisão de arquivos", [
+            'total' => $totalArquivos,
+            'prioritarios' => count($arquivosPrioritarios),
+            'normais' => count($arquivosNormais),
+            'limite_por_parte' => $this->arquivosPorParte
+        ]);
 
-    protected function montarDadosEnvio(array $escolaIds, int $serieId): array
+        $partes = [];
+        $numeroParte = 1;
+
+        // ✅ PARTE 1: Prioriza "Plano de ensino"
+        $parte1 = [];
+
+        // Adiciona arquivos prioritários primeiro
+        foreach ($arquivosPrioritarios as $arquivo) {
+            if (count($parte1) < $this->arquivosPorParte) {
+                $parte1[] = $arquivo;
+            } else {
+                // Se já encheu com prioritários, joga o resto nos arquivos normais
+                $arquivosNormais[] = $arquivo;
+            }
+        }
+
+        // Completa a parte 1 com arquivos normais se ainda tiver espaço
+        while (count($parte1) < $this->arquivosPorParte && !empty($arquivosNormais)) {
+            $parte1[] = array_shift($arquivosNormais);
+        }
+
+        $partes[1] = $parte1;
+
+        Log::info("Parte 1 criada", [
+            'total_arquivos' => count($parte1),
+            'prioritarios_incluidos' => count(array_filter($parte1, function ($arq) {
+                return stripos($arq['nome'] ?? '', 'Plano de ensino') !== false;
+            }))
+        ]);
+
+        // ✅ DEMAIS PARTES: Distribui os arquivos restantes
+        $arquivosRestantes = $arquivosNormais;
+        $numeroParte = 2;
+
+        while (!empty($arquivosRestantes)) {
+            $partes[$numeroParte] = array_splice($arquivosRestantes, 0, $this->arquivosPorParte);
+
+            Log::info("Parte {$numeroParte} criada", [
+                'total_arquivos' => count($partes[$numeroParte])
+            ]);
+
+            $numeroParte++;
+        }
+
+        Log::info("Divisão finalizada", [
+            'total_partes' => count($partes),
+            'distribuicao' => array_map('count', $partes)
+        ]);
+
+        return $partes;
+    }   
+
+    public function montarDadosEnvio(array $escolaIds, int $serieId): array
     {
         $dados = [];
         $escolasProcessadas = []; // Evita duplicatas
@@ -267,7 +348,7 @@ class AtividadeEnvioService
         return $dados;
     }
 
-    protected function enviarParaEscola(
+    public function enviarParaEscola(
         array $dadosEscola,
         string $titulo,
         string $descricao,
@@ -307,14 +388,17 @@ class AtividadeEnvioService
                 $courseWork->setWorkType('ASSIGNMENT');
                 $courseWork->setTopicId($turmaPrincipal->classroom_topic_id);
 
-
                 if (!empty($arquivos)) {
                     $materials = [];
 
                     foreach ($arquivos as $arquivo) {
+                        $driveFile = new DriveFile();
+                        $driveFile->setId($arquivo['id']);
+                        $driveFile->setTitle($arquivo['nome']);
+
                         $sharedDriveFile = new SharedDriveFile();
-                        $sharedDriveFile->setDriveFileId($arquivo['id']); // ✅ CORRETO
-                        $sharedDriveFile->setShareMode('STUDENT_COPY');   // ✅ ÚNICO LUGAR VÁLIDO
+                        $sharedDriveFile->setDriveFile($driveFile);
+                        $sharedDriveFile->setShareMode('STUDENT_COPY');
 
                         $material = new Material();
                         $material->setDriveFile($sharedDriveFile);
@@ -336,60 +420,25 @@ class AtividadeEnvioService
                     $courseWork->setAssigneeMode('ALL_STUDENTS');
                 }
 
-                // Envia para o Classroom
                 $resultado = $classroom->courses_courseWork->create($courseId, $courseWork);
 
                 if (!$resultado || !$resultado->getId()) {
                     throw new \Exception('Atividade criada mas sem ID retornado');
                 }
 
-                // Salva no banco de dados
-                $atividade = Atividade::create([
-                    'google_account_id' => $this->googleService->getMainAccount()->id,
-                    'turma_id' => $turmaPrincipal->id,
-                    'serie_id' => $turmaPrincipal->serie_id,
-                    'titulo' => $titulo,
-                    'descricao' => $descricao,
-                ]);
-
-                // Vincula à escola com o classroom_coursework_id no pivot
-                $atividade->escolas()->attach($escola->id, [
-                    'classroom_coursework_id' => $resultado->getId()
-                ]);
-
-                // Vincula aos professores
-                $professorIds = $professores->pluck('id')->toArray();
-                if (!empty($professorIds)) {
-                    $atividade->professores()->attach($professorIds);
-                    Log::info("Professores vinculados", [
-                        'atividade_id' => $atividade->id,
-                        'professor_ids' => $professorIds
-                    ]);
-
-                    // Verifica se realmente salvou
-                    $atividadeComProfs = Atividade::with('professores')->find($atividade->id);
-                    Log::info("Professores carregados após attach", [
-                        'count' => $atividadeComProfs->professores->count(),
-                        'nomes' => $atividadeComProfs->professores->pluck('nome')->toArray()
-                    ]);
-                }
-                Log::info("✓ Atividade criada com sucesso", [
+                Log::info("✓ Atividade criada no Classroom", [
                     'escola' => $escola->nome,
                     'turma' => $turmaPrincipal->nome,
-                    'parte' => $numeroParte,
-                    'coursework_id' => $resultado->getId(),
-                    'professores_vinculados' => count($professorIds),
-                    'tentativa' => $tentativa
+                    'coursework_id' => $resultado->getId()
                 ]);
 
-                // SUCESSO: retorna imediatamente
+                // ✅ RETORNA APENAS O ID DO COURSEWORK
                 return [
                     'sucesso' => true,
                     'escola' => $escola->nome,
                     'turma' => $turmaPrincipal->nome,
                     'parte' => $numeroParte,
                     'coursework_id' => $resultado->getId(),
-                    'professores_vinculados' => count($professorIds),
                     'tentativa' => $tentativa
                 ];
             } catch (\Exception $e) {
@@ -397,30 +446,20 @@ class AtividadeEnvioService
 
                 Log::warning("✗ Erro na tentativa {$tentativa}/{$this->maxTentativas}", [
                     'escola' => $escola->nome,
-                    'turma' => $turmaPrincipal->nome,
-                    'parte' => $numeroParte,
                     'erro' => $ultimoErro
                 ]);
 
                 if ($tentativa < $this->maxTentativas) {
                     $tempoEspera = 2 * $tentativa;
-                    Log::info("  Aguardando {$tempoEspera}s antes da próxima tentativa...");
                     sleep($tempoEspera);
                 }
             }
         }
 
-        Log::error("✗ Falha após {$this->maxTentativas} tentativas", [
-            'escola' => $escola->nome,
-            'turma' => $turmaPrincipal->nome,
-            'parte' => $numeroParte,
-            'ultimo_erro' => $ultimoErro
-        ]);
-
         return [
             'sucesso' => false,
             'escola' => $escola->nome,
-            'turma' => $turmaPrincipal->nome,
+            'turma' => $turmaPrincipal->nome ?? 'N/A',
             'parte' => $numeroParte,
             'erro' => $ultimoErro,
             'tentativa' => $tentativa

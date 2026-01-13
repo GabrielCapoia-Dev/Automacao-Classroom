@@ -75,13 +75,15 @@ class EscolaSyncService
         $mainAccountId = $this->googleService->getMainAccount()->id;
 
         do {
-            $response = $classroom->courses_topics->listCoursesTopics(
-                $escola->classroom_course_id,
-                [
-                    'pageSize' => 100,
-                    'pageToken' => $pageToken,
-                ]
-            );
+            $response = $this->retry(function () use ($classroom, $escola, $pageToken) {
+                return $classroom->courses_topics->listCoursesTopics(
+                    $escola->classroom_course_id,
+                    [
+                        'pageSize' => 100,
+                        'pageToken' => $pageToken,
+                    ]
+                );
+            });
 
             /** @var Topic[] $topics */
             $topics = $response->getTopic() ?? [];
@@ -122,6 +124,32 @@ class EscolaSyncService
         } while ($pageToken);
     }
 
+    protected function retry(callable $callback, int $maxAttempts = 5)
+    {
+        $attempt = 0;
+        $delay = 1; // segundos
+
+        beginning:
+        try {
+            return $callback();
+        } catch (\Google\Service\Exception $e) {
+            $attempt++;
+
+            $errors = $e->getErrors();
+            $reason = $errors[0]['reason'] ?? null;
+
+            if (
+                $attempt < $maxAttempts &&
+                in_array($reason, ['backendError', 'internalError', 'rateLimitExceeded'])
+            ) {
+                sleep($delay);
+                $delay *= 2; // exponential backoff
+                goto beginning;
+            }
+
+            throw $e;
+        }
+    }
 
     /**
      * Centraliza a criação do client Classroom

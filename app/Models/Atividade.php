@@ -14,8 +14,18 @@ class Atividade extends Model
         'turma_id',
         'serie_id',
         'titulo',
+        'titulo_original',
+        'numero_parte',
+        'total_partes',
         'descricao',
         'classroom_coursework_id',
+        'drive_folder_id',
+        'drive_folder_url',
+        'arquivos_parte',
+    ];
+
+    protected $casts = [
+        'arquivos_parte' => 'array', // ✅ Auto-decode JSON
     ];
 
     public function turma()
@@ -27,7 +37,7 @@ class Atividade extends Model
     {
         return $this->belongsTo(Serie::class);
     }
-    
+
     public function professores()
     {
         return $this->belongsToMany(
@@ -46,5 +56,41 @@ class Atividade extends Model
             'atividade_id',
             'escola_id'
         )->withPivot('classroom_coursework_id')->withTimestamps();
+    }
+
+    /**
+     * Retorna todas as partes desta atividade
+     */
+    public function todasAsPartes()
+    {
+        if (!$this->titulo_original) {
+            return collect([$this]);
+        }
+
+        return self::where('titulo_original', $this->titulo_original)
+            ->where('serie_id', $this->serie_id)
+            ->orderBy('numero_parte')
+            ->get();
+    }
+
+    /**
+     * Retorna turmas relacionadas
+     */
+    public function getTurmasRelacionadas()
+    {
+        return Turma::whereIn('escola_id', $this->escolas->pluck('id'))
+            ->where('serie_id', $this->serie_id)
+            ->get();
+    }
+
+    /**
+     * Scope para pegar apenas a primeira parte de cada atividade (para listagem)
+     */
+    public function scopeApenasAtividadesPrincipais($query)
+    {
+        return $query->where(function ($q) {
+            $q->where('numero_parte', 1)
+                ->orWhereNull('titulo_original');
+        });
     }
 }
