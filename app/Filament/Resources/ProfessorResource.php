@@ -45,6 +45,12 @@ class ProfessorResource extends Resource
     public static function table(Table $table): Table
     {
         return $table
+            ->description(function () {
+                $escolas = \App\Models\Escola::count();
+                $professores = \App\Models\Professor::count();
+
+                return "Escolas: {$escolas} | Professores: {$professores}";
+            })
             ->columns([
                 Tables\Columns\TextColumn::make('escola.nome')
                     ->numeric()
@@ -80,6 +86,39 @@ class ProfessorResource extends Resource
                     ->preload(),
             ])
             ->actions([])
+            ->headerActions([
+                Tables\Actions\Action::make('vincularTodos')
+                    ->label('Vincular Todos')
+                    ->icon('heroicon-o-link')
+                    ->color('success')
+                    ->requiresConfirmation()
+                    ->modalHeading('Vincular Todos os Professores')
+                    ->modalDescription('Isso vai vincular cada professor a TODAS as turmas da sua escola. Deseja continuar?')
+                    ->action(function () {
+                        $escolas = \App\Models\Escola::with(['professores', 'turmas'])->get();
+
+                        $totalVinculos = 0;
+
+                        foreach ($escolas as $escola) {
+                            $turmaIds = $escola->turmas->pluck('id')->toArray();
+
+                            if (empty($turmaIds)) {
+                                continue;
+                            }
+
+                            foreach ($escola->professores as $professor) {
+                                $professor->turmas()->syncWithoutDetaching($turmaIds);
+                                $totalVinculos++;
+                            }
+                        }
+
+                        \Filament\Notifications\Notification::make()
+                            ->title('Vínculos realizados')
+                            ->body("Processados {$totalVinculos} professor(es)")
+                            ->success()
+                            ->send();
+                    }),
+            ])
             ->bulkActions([
                 Tables\Actions\BulkAction::make('vincularTurmas')
                     ->label('Vincular')

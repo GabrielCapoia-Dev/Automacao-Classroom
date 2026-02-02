@@ -15,9 +15,6 @@ RUN composer install --no-dev --optimize-autoloader --no-interaction --prefer-di
 
 COPY . .
 
-RUN composer dump-autoload --optimize \
-    && composer run-script post-autoload-dump
-
 RUN chown -R www-data:www-data /var/www \
     && chmod -R 755 /var/www
 

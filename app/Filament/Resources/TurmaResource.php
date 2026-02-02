@@ -35,18 +35,26 @@ class TurmaResource extends Resource
             ->columns([
                 Tables\Columns\TextColumn::make('escola.nome')
                     ->numeric()
+                    ->searchable()
                     ->sortable(),
                 Tables\Columns\TextColumn::make('nome')
+                    ->sortable()
                     ->searchable(),
                 Tables\Columns\TextColumn::make('classroom_topic_id')
                     ->searchable()
+                    ->sortable()
+
                     ->toggleable(isToggledHiddenByDefault: true),
                 Tables\Columns\TextColumn::make('updated_at')
                     ->dateTime()
                     ->sortable()
                     ->toggleable(isToggledHiddenByDefault: true),
             ])
-            ->filters([])
+            ->filters([
+                Tables\Filters\SelectFilter::make('serie_id')
+                    ->label('Série')
+                    ->relationship('serie', 'nome'),
+            ])
             ->actions([])
             ->bulkActions([]);
     }
