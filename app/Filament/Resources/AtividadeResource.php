@@ -492,6 +492,7 @@ class AtividadeResource extends Resource
                                 Forms\Components\Textarea::make('descricao')
                                     ->label('Descrição')
                                     ->rows(4)
+                                    ->live()
                                     ->maxLength(65535),
                             ]),
 

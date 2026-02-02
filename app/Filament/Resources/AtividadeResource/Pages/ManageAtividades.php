@@ -23,22 +23,34 @@ class ManageAtividades extends ManageRecords
                 ->label('Nova Atividade')
                 ->icon('heroicon-o-plus-circle')
                 ->color('success')
-                ->slideOver()  // Abre como slideOver lateral
-                ->modalWidth('4xl')  // Largura do modal
+                ->slideOver()
+                ->modalWidth('4xl')
                 ->modalHeading('Criar Nova Atividade')
                 ->modalDescription('Preencha os dados para criar uma nova atividade')
                 ->modalSubmitAction(false)
                 ->createAnother(false)
                 ->successNotificationTitle('Atividade criada com sucesso!')
                 ->closeModalByClickingAway(false)
+
+                ->fillForm([
+                    'descricao' =>
+                    "Olá, professor(a)!\n" .
+                        "A rotina semanal e os planos de ensino já estão disponíveis. Para acessá-los, siga as orientações a seguir.\n\n" .
+                        "✅ Abra a ROTINA e complete com os objetos de conhecimento/habilidades e objetivos de aprendizagem.\n" .
+                        "✅ Consulte os PLANOS DE ENSINO e prepare as aulas conforme as especificidades de cada turma, com as adequações necessárias aos estudantes.\n" .
+                        "✅ Os documentos são salvos automaticamente.\n" .
+                        "✅ Para imprimir, basta abrir o documento, acessar a aba \"Arquivo\" e clicar em \"Imprimir\", sem necessidade de salvar previamente.\n\n" .
+                        "Bom trabalho! 🚀✨",
+                ])
+
                 ->after(function () {
-                    // Código que roda após criar
                     \Filament\Notifications\Notification::make()
                         ->title('Sucesso!')
                         ->body('A atividade foi criada.')
                         ->success()
                         ->send();
                 }),
+
         ];
     }
     protected function mutateFormDataBeforeCreate(array $data): array
