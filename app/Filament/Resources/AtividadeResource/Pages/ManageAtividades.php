@@ -51,6 +51,7 @@ class ManageAtividades extends ManageRecords
                         ->send();
                 }),
 
+                
         ];
     }
     protected function mutateFormDataBeforeCreate(array $data): array

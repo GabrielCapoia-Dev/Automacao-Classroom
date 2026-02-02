@@ -9,15 +9,9 @@ COPY --from=composer:2 /usr/bin/composer /usr/bin/composer
 
 WORKDIR /var/www
 
-COPY composer.json composer.lock ./
+COPY entrypoint.sh /usr/local/bin/entrypoint.sh
+RUN chmod +x /usr/local/bin/entrypoint.sh
 
-RUN composer install --no-dev --optimize-autoloader --no-interaction --prefer-dist --no-scripts
+EXPOSE 8000
 
-COPY . .
-
-RUN chown -R www-data:www-data /var/www \
-    && chmod -R 755 /var/www
-
-EXPOSE 9000
-
-CMD ["php-fpm"]
+ENTRYPOINT ["entrypoint.sh"]
