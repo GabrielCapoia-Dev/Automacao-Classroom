@@ -4,11 +4,11 @@ namespace App\Filament\Resources\AtividadeResource\Pages;
 
 use App\Filament\Resources\AtividadeResource;
 use App\Models\Atividade;
+use App\Services\Atividade\AtividadeSyncService;
+use App\Services\GoogleMainService;
 use Filament\Actions;
+use Filament\Notifications\Notification;
 use Filament\Resources\Pages\ManageRecords;
-use Filament\Tables\Actions\DeleteAction;
-use Filament\Tables\Actions\EditAction;
-use Filament\Tables\Actions\ViewAction;
 
 class ManageAtividades extends ManageRecords
 {
@@ -19,6 +19,37 @@ class ManageAtividades extends ManageRecords
     protected function getHeaderActions(): array
     {
         return [
+            Actions\Action::make('importarAtividades')
+                ->label('Importar do Classroom')
+                ->icon('heroicon-o-arrow-down-tray')
+                ->color('info')
+                ->requiresConfirmation()
+                ->modalHeading('Importar Atividades do Classroom')
+                ->modalDescription('Isso vai importar todas as atividades (courseworks) do Google Classroom que ainda não foram importadas. Atividades sem tópico (turma) serão ignoradas.')
+                ->modalSubmitActionLabel('Importar')
+                ->action(function () {
+                    try {
+                        $syncService = new AtividadeSyncService(
+                            app(GoogleMainService::class)
+                        );
+
+                        $stats = $syncService->syncAtividades();
+
+                        Notification::make()
+                            ->title('Importação concluída')
+                            ->body("Criadas: {$stats['criadas']} | Ignoradas: {$stats['ignoradas']}")
+                            ->success()
+                            ->send();
+
+                    } catch (\Exception $e) {
+                        Notification::make()
+                            ->title('Erro na importação')
+                            ->body($e->getMessage())
+                            ->danger()
+                            ->send();
+                    }
+                }),
+
             Actions\CreateAction::make()
                 ->label('Nova Atividade')
                 ->icon('heroicon-o-plus-circle')
@@ -31,7 +62,6 @@ class ManageAtividades extends ManageRecords
                 ->createAnother(false)
                 ->successNotificationTitle('Atividade criada com sucesso!')
                 ->closeModalByClickingAway(false)
-
                 ->fillForm([
                     'descricao' =>
                     "Olá, professor(a)!\n" .
@@ -42,31 +72,27 @@ class ManageAtividades extends ManageRecords
                         "✅ Para imprimir, basta abrir o documento, acessar a aba \"Arquivo\" e clicar em \"Imprimir\", sem necessidade de salvar previamente.\n\n" .
                         "Bom trabalho! 🚀✨",
                 ])
-
                 ->after(function () {
-                    \Filament\Notifications\Notification::make()
+                    Notification::make()
                         ->title('Sucesso!')
                         ->body('A atividade foi criada.')
                         ->success()
                         ->send();
                 }),
-
-                
         ];
     }
+
     protected function mutateFormDataBeforeCreate(array $data): array
     {
         $serieId  = $data['serie_id'];
         $escolas  = $data['escolas'] ?? [];
 
-        // Turmas da série filtradas pelas escolas
         $turmas = \App\Models\Turma::query()
             ->where('serie_id', $serieId)
             ->whereIn('escola_id', $escolas)
             ->with(['professores', 'escola'])
             ->get();
 
-        // Guarda temporariamente para usar depois
         $this->turmasDaSerie = $turmas;
 
         return $data;
@@ -74,27 +100,14 @@ class ManageAtividades extends ManageRecords
 
     protected function afterCreate(): void
     {
-        /** @var \App\Models\Atividade $atividade */
+        /** @var Atividade $atividade */
         $atividade = $this->record;
 
         foreach ($this->turmasDaSerie as $turma) {
-
-            // Professores vinculados à turma (já filtrados por escola)
             $professores = $turma->professores
                 ->where('escola_id', $turma->escola_id);
 
             foreach ($professores as $professor) {
-
-                /**
-                 * AQUI você decide o que fazer:
-                 *
-                 * - enviar atividade pro Classroom
-                 * - registrar vínculo
-                 * - criar log
-                 * - criar pivot
-                 */
-
-                // Exemplo de vínculo lógico (ajuste ao seu modelo)
                 $atividade->turmas()->attach($turma->id, [
                     'professor_id' => $professor->id,
                 ]);
