@@ -12,8 +12,18 @@ class Serie extends Model
 
     protected $fillable = [
         'google_account_id',
-        'nome'
+        'nome',
+        'cor' // ✅ Novo campo
     ];
+
+    // Cores padrão caso não tenha sido definida
+    public static function coresPadrao(): array
+    {
+        return [
+            'blue', 'green', 'red', 'yellow', 'purple', 
+            'pink', 'indigo', 'cyan', 'orange', 'lime'
+        ];
+    }
 
     public function googleAccount()
     {
@@ -25,9 +35,6 @@ class Serie extends Model
         return $this->hasMany(Turma::class);
     }
 
-    /**
-     * Scope para filtrar séries da conta MAIN
-     */
     public function scopeFromMainAccount(Builder $query): Builder
     {
         $accountId = GoogleAccount::main()?->id;

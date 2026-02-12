@@ -17,8 +17,8 @@ use Google\Service\Classroom\SharedDriveFile;
 class AtividadeEnvioService
 {
     public bool $cancelado = false;
-    public int $maxTentativas = 3;
-    public int $arquivosPorParte = 7;
+    public int $maxTentativas = 10;
+    public int $arquivosPorParte = 10;
 
     public function __construct(
         public GoogleMainService $googleService
@@ -84,7 +84,7 @@ class AtividadeEnvioService
             }
 
             $tituloComParte = $totalPartes > 1
-                ? "Parte {$numeroParte} - {$titulo}"
+                ? numeroParaRomano($numeroParte) . " - {$titulo}"
                 : $titulo;
 
             // ✅ CRIA UMA ÚNICA ATIVIDADE NO BANCO
@@ -278,7 +278,7 @@ class AtividadeEnvioService
         ]);
 
         return $partes;
-    }   
+    }
 
     public function montarDadosEnvio(array $escolaIds, int $serieId): array
     {

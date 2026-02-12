@@ -76,7 +76,7 @@ class AtividadeEditService
             // Atualiza dados da atividade no banco
             if (isset($data['titulo']) || isset($data['descricao'])) {
                 $novoTitulo = $atividade->total_partes > 1
-                    ? "Parte {$atividade->numero_parte} - {$data['titulo']}"
+                    ? numeroParaRomano($atividade->numero_parte) . " - {$data['titulo']}"
                     : $data['titulo'];
 
                 $atividade->update([
@@ -114,7 +114,7 @@ class AtividadeEditService
         // ✅ Verifica se título realmente mudou
         if (isset($data['titulo'])) {
             $novoTitulo = $atividade->total_partes > 1
-                ? "Parte {$atividade->numero_parte} - {$data['titulo']}"
+                ? numeroParaRomano($atividade->numero_parte) . " - {$data['titulo']}"
                 : $data['titulo'];
 
             if ($novoTitulo !== $atividade->titulo) {

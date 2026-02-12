@@ -23,7 +23,8 @@ use Filament\Forms\Components\Actions;
 use Filament\Forms\Components\Actions\Action;
 use Filament\Forms\Components\ViewField;
 use Filament\Notifications\Notification;
-use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\DB;
+use App\Services\Serie\SerieService;
 
 class AtividadeResource extends Resource
 {
@@ -201,7 +202,7 @@ class AtividadeResource extends Resource
                                 }
 
                                 $total = count($arquivos);
-                                $partes = (int) ceil($total / 5);
+                                $partes = (int) ceil($total / 10);
                                 $nomes = collect($arquivos)->pluck('name')->take(3)->implode(', ');
 
                                 return "📁 {$total} arquivo(s) | {$partes} parte(s) | {$nomes}" . ($total > 3 ? '...' : '');
@@ -328,9 +329,6 @@ class AtividadeResource extends Resource
 
                                             $resultados = $envioService->enviarAtividade(
                                                 $dadosAtividade,
-                                                function ($progresso) use ($ativ) {
-                                                    Log::info("Progresso [{$ativ['titulo']}]", $progresso);
-                                                }
                                             );
 
                                             $totalSucessos += $resultados['sucessos'];
@@ -357,12 +355,7 @@ class AtividadeResource extends Resource
 
                                         // Limpa o formulário
                                         $set('atividades', [['titulo' => '', 'url' => '', 'arquivos_drive' => []]]);
-
                                     } catch (\Exception $e) {
-                                        Log::error('Erro no envio em lote', [
-                                            'erro' => $e->getMessage(),
-                                            'trace' => $e->getTraceAsString()
-                                        ]);
 
                                         Notification::make()
                                             ->title('Erro ao Enviar')
@@ -406,8 +399,6 @@ class AtividadeResource extends Resource
 
                 Tables\Columns\TextColumn::make('total_partes')
                     ->label('Partes')
-                    ->badge()
-                    ->color('info')
                     ->formatStateUsing(fn($state) => $state > 1 ? "{$state} partes" : '1 parte')
                     ->alignCenter(),
 
@@ -415,7 +406,7 @@ class AtividadeResource extends Resource
                     ->label('Série')
                     ->sortable()
                     ->badge()
-                    ->color('info')
+                    ->color(fn($record) => app(SerieService::class)->getCorPorNomeSerie($record->serie?->nome))
                     ->searchable(),
 
                 Tables\Columns\TextColumn::make('escolas_count')
@@ -435,6 +426,121 @@ class AtividadeResource extends Resource
                     ->dateTime('d/m/Y H:i')
                     ->sortable()
                     ->toggleable(),
+            ])
+            ->headerActions([
+                Tables\Actions\Action::make('reajustarTodasAtividades')
+                    ->label('Reajustar Todos os Professores')
+                    ->icon('heroicon-o-arrow-path')
+                    ->color('warning')
+                    ->requiresConfirmation()
+                    ->modalHeading('Reajustar Professores de TODAS as Atividades')
+                    ->modalDescription('⚠️ Esta ação vai sincronizar os professores de TODAS as atividades com base nos vínculos atuais das turmas no SISTEMA (banco de dados). Esta operação pode levar vários minutos.')
+                    ->modalSubmitActionLabel('Sim, Reajustar Todas')
+                    ->action(function () {
+                        try {
+                            $atividadesPrincipais = \App\Models\Atividade::apenasAtividadesPrincipais()->get();
+
+                            $totalAdicionados = 0;
+                            $totalRemovidos = 0;
+                            $totalAtividades = 0;
+                            $detalhes = [];
+
+                            DB::beginTransaction();
+
+                            foreach ($atividadesPrincipais as $atividadePrincipal) {
+                                $todasAsPartes = $atividadePrincipal->todasAsPartes();
+
+                                foreach ($todasAsPartes as $parte) {
+                                    // Refresh para garantir dados atualizados
+                                    $parte->load(['escolas', 'professores', 'serie']);
+
+                                    // Calcular professores corretos baseados nos vínculos de turma
+                                    $professoresCorretos = \App\Models\Professor::query()
+                                        ->whereIn('escola_id', $parte->escolas->pluck('id')->toArray())
+                                        ->whereHas('turmas', function ($q) use ($parte) {
+                                            $q->where('serie_id', $parte->serie_id);
+                                        })
+                                        ->whereNotNull('classroom_user_id')
+                                        ->pluck('id')
+                                        ->toArray();
+
+                                    // Professores que atualmente têm acesso
+                                    $professoresAtuais = DB::table('atividade_professor')
+                                        ->where('atividade_id', $parte->id)
+                                        ->pluck('professor_id')
+                                        ->toArray();
+
+                                    $paraAdicionar = array_diff($professoresCorretos, $professoresAtuais);
+                                    $paraRemover = array_diff($professoresAtuais, $professoresCorretos);
+
+
+                                    // REMOVER professores que não deveriam ter acesso
+                                    if (!empty($paraRemover)) {
+                                        $removidos = DB::table('atividade_professor')
+                                            ->where('atividade_id', $parte->id)
+                                            ->whereIn('professor_id', $paraRemover)
+                                            ->delete();
+
+                                        $totalRemovidos += $removidos;
+                                        $detalhes[] = "📝 {$parte->titulo} (ID {$parte->id}): removeu {$removidos}";
+                                    }
+
+                                    // ADICIONAR professores que deveriam ter acesso
+                                    if (!empty($paraAdicionar)) {
+                                        $dados = [];
+                                        $now = now();
+                                        foreach ($paraAdicionar as $professorId) {
+                                            $dados[] = [
+                                                'atividade_id' => $parte->id,
+                                                'professor_id' => $professorId,
+                                                'created_at' => $now,
+                                                'updated_at' => $now,
+                                            ];
+                                        }
+                                        DB::table('atividade_professor')->insert($dados);
+
+                                        $totalAdicionados += count($paraAdicionar);
+                                        $detalhes[] = "📝 {$parte->titulo} (ID {$parte->id}): adicionou " . count($paraAdicionar);
+                                    }
+
+                                    $totalAtividades++;
+                                }
+                            }
+
+                            DB::commit();
+
+                            $mensagem = "✅ {$totalAdicionados} professor(es) ADICIONADO(S) ao sistema\n" .
+                                "❌ {$totalRemovidos} professor(es) REMOVIDO(S) do sistema\n" .
+                                "📊 {$totalAtividades} atividade(s) processada(s)";
+
+                            if (count($detalhes) > 0) {
+                                $mensagem .= "\n\n📋 DETALHES:\n" . implode("\n", array_slice($detalhes, 0, 15));
+                                if (count($detalhes) > 15) {
+                                    $mensagem .= "\n... e mais " . (count($detalhes) - 15) . " atividades";
+                                }
+                            } else {
+                                $mensagem .= "\n\n✓ Nenhuma mudança necessária - todos os vínculos já estavam corretos!";
+                            }
+
+                            \Filament\Notifications\Notification::make()
+                                ->title('Reajuste Concluído')
+                                ->body($mensagem)
+                                ->success()
+                                ->persistent()
+                                ->send();
+                        } catch (\Exception $e) {
+                            DB::rollBack();
+
+
+                            \Filament\Notifications\Notification::make()
+                                ->title('Erro ao Reajustar')
+                                ->body("Erro: {$e->getMessage()}\nVerifique os logs para mais detalhes.")
+                                ->danger()
+                                ->persistent()
+                                ->send();
+                        }
+                    }),
+
             ])
             ->filters([
                 Tables\Filters\SelectFilter::make('serie')
@@ -601,16 +707,33 @@ class AtividadeResource extends Resource
 
                                     $isNovaEscola = in_array($escola->id, $novasEscolas);
                                     $badge = $isNovaEscola ? ' 🆕 NOVA' : '';
+                                    $todosIds = $professoresDaEscola->pluck('id')->toArray();
 
                                     $fieldsets[] = Forms\Components\Fieldset::make("escola_{$escola->id}")
                                         ->label($escola->nome . $badge)
                                         ->schema([
+                                            Forms\Components\Checkbox::make("todos_escola_{$escola->id}")
+                                                ->label('Selecionar Todos')
+                                                ->live()
+                                                ->dehydrated(false)
+                                                ->afterStateHydrated(function ($state, callable $get, callable $set) use ($escola, $todosIds) {
+                                                    $selecionados = $get("professores_escola_{$escola->id}") ?? [];
+                                                    $set("todos_escola_{$escola->id}", count($selecionados) === count($todosIds) && count($todosIds) > 0);
+                                                })
+                                                ->afterStateUpdated(function ($state, callable $set) use ($escola, $todosIds) {
+                                                    $set("professores_escola_{$escola->id}", $state ? $todosIds : []);
+                                                }),
+
                                             Forms\Components\CheckboxList::make("professores_escola_{$escola->id}")
                                                 ->label('')
                                                 ->options($professoresDaEscola->pluck('nome', 'id'))
                                                 ->columns(2)
                                                 ->columnSpanFull()
                                                 ->live()
+                                                ->afterStateUpdated(function ($state, callable $set) use ($escola, $todosIds) {
+                                                    $selecionados = $state ?? [];
+                                                    $set("todos_escola_{$escola->id}", count($selecionados) === count($todosIds));
+                                                })
                                         ])
                                         ->columnSpanFull();
                                 }
@@ -716,10 +839,6 @@ class AtividadeResource extends Resource
 
                             redirect()->to(request()->header('Referer'));
                         } catch (\Exception $e) {
-                            Log::error("Erro na action de edição", [
-                                'erro' => $e->getMessage(),
-                                'trace' => $e->getTraceAsString()
-                            ]);
 
                             Notification::make()
                                 ->title('Erro ao Atualizar')
