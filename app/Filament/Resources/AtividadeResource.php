@@ -426,6 +426,12 @@ class AtividadeResource extends Resource
                     ->dateTime('d/m/Y H:i')
                     ->sortable()
                     ->toggleable(),
+
+                Tables\Columns\TextColumn::make('updated_at')
+                    ->label('Atualizado em')
+                    ->dateTime('d/m/Y H:i')
+                    ->sortable()
+                    ->toggleable(),
             ])
             ->headerActions([
                 Tables\Actions\Action::make('reajustarTodasAtividades')
