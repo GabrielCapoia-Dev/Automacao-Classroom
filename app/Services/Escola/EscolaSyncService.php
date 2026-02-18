@@ -23,6 +23,8 @@ class EscolaSyncService
         $classroom = $this->getClassroom();
 
         $pageToken = null;
+        $courseIds = [];
+        $mainAccountId = $this->googleService->getMainAccount()->id;
 
         do {
             $response = $classroom->courses->listCourses([
@@ -31,14 +33,17 @@ class EscolaSyncService
                 'courseStates' => ['ACTIVE', 'ARCHIVED'],
             ]);
 
-            /** @var Course[] $courses */
             $courses = $response->getCourses() ?? [];
 
             foreach ($courses as $course) {
+
+                $courseId = $course->getId();
+                $courseIds[] = $courseId;
+
                 Escola::updateOrCreate(
-                    ['classroom_course_id' => $course->getId()],
+                    ['classroom_course_id' => $courseId],
                     [
-                        'google_account_id' => $this->googleService->getMainAccount()->id,
+                        'google_account_id' => $mainAccountId,
                         'nome' => $course->getName(),
                     ]
                 );
@@ -46,6 +51,11 @@ class EscolaSyncService
 
             $pageToken = $response->getNextPageToken();
         } while ($pageToken);
+
+        // 🔥 remover escolas que não existem mais no Classroom
+        Escola::where('google_account_id', $mainAccountId)
+            ->whereNotIn('classroom_course_id', $courseIds)
+            ->delete();
     }
 
     /**
@@ -74,6 +84,8 @@ class EscolaSyncService
         $pageToken = null;
         $mainAccountId = $this->googleService->getMainAccount()->id;
 
+        $topicIds = [];
+
         do {
             $response = $this->retry(function () use ($classroom, $escola, $pageToken) {
                 return $classroom->courses_topics->listCoursesTopics(
@@ -85,20 +97,20 @@ class EscolaSyncService
                 );
             });
 
-            /** @var Topic[] $topics */
             $topics = $response->getTopic() ?? [];
 
             foreach ($topics as $topic) {
-                $nomeTurma = trim($topic->getName());
 
+                $nomeTurma = trim($topic->getName());
                 if ($nomeTurma === '') {
                     continue;
                 }
 
-                // 1️⃣ normaliza nome da série
+                $topicId = $topic->getTopicId();
+                $topicIds[] = $topicId;
+
                 $serieNome = $this->normalizeSerieName($nomeTurma);
 
-                // 2️⃣ cria ou recupera a série COM google_account_id
                 $serie = \App\Models\Serie::firstOrCreate(
                     [
                         'google_account_id' => $mainAccountId,
@@ -106,10 +118,9 @@ class EscolaSyncService
                     ]
                 );
 
-                // 3️⃣ cria ou atualiza a turma vinculando à série
                 Turma::updateOrCreate(
                     [
-                        'classroom_topic_id' => $topic->getTopicId(),
+                        'classroom_topic_id' => $topicId,
                         'escola_id' => $escola->id,
                     ],
                     [
@@ -122,7 +133,13 @@ class EscolaSyncService
 
             $pageToken = $response->getNextPageToken();
         } while ($pageToken);
+
+        // 🔥 remover turmas que não existem mais no Classroom
+        Turma::where('escola_id', $escola->id)
+            ->whereNotIn('classroom_topic_id', $topicIds)
+            ->delete();
     }
+
 
     protected function retry(callable $callback, int $maxAttempts = 5)
     {

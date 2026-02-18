@@ -47,6 +47,26 @@ class ProfessorResource extends Resource
 
     public static function table(Table $table): Table
     {
+        $series = \App\Models\Serie::query()
+            ->whereHas('turmas.professores')
+            ->orderBy('nome')
+            ->get();
+
+        $dynamicColumns = [];
+
+        foreach ($series as $serie) {
+
+            $alias = 'serie_' . $serie->id;
+
+            $dynamicColumns[] =
+                Tables\Columns\IconColumn::make($alias)
+                ->label($serie->nome)
+                ->boolean()
+                ->sortable()
+                ->toggleable(isToggledHiddenByDefault: true)
+                ->alignCenter();
+        }
+
         return $table
             ->description(function () {
                 $escolas = \App\Models\Escola::count();
@@ -54,7 +74,20 @@ class ProfessorResource extends Resource
 
                 return "Escolas: {$escolas} | Professores: {$professores}";
             })
-            ->columns([
+            ->modifyQueryUsing(function (Builder $query) use ($series) {
+
+                foreach ($series as $serie) {
+
+                    $alias = 'serie_' . $serie->id;
+
+                    $query->withCount([
+                        "turmas as {$alias}" => function ($q) use ($serie) {
+                            $q->where('serie_id', $serie->id);
+                        }
+                    ]);
+                }
+            })
+            ->columns(array_merge([
                 Tables\Columns\TextColumn::make('escola.nome')
                     ->numeric()
                     ->sortable(),
@@ -67,6 +100,7 @@ class ProfessorResource extends Resource
                     ->copyMessage('Copiado!')
                     ->copyableState(fn($state) => $state)
                     ->searchable(),
+
                 Tables\Columns\TextColumn::make('turmas.nome')
                     ->label('Turmas')
                     ->badge()
@@ -87,7 +121,7 @@ class ProfessorResource extends Resource
                     ->dateTime()
                     ->sortable()
                     ->toggleable(isToggledHiddenByDefault: true),
-            ])
+            ], $dynamicColumns))
             ->filters([
                 Tables\Filters\SelectFilter::make('escola_id')
                     ->label('Escola')
@@ -119,170 +153,39 @@ class ProfessorResource extends Resource
             ->actions([])
             ->headerActions([
 
-                Tables\Actions\Action::make('reprocessarVinculos')
-                    ->label('Reprocessar Vínculos')
-                    ->icon('heroicon-o-arrow-path')
+                Tables\Actions\Action::make('removerTodosVinculos')
+                    ->label('Remover Todos os Vínculos')
+                    ->icon('heroicon-o-trash')
                     ->color('danger')
                     ->requiresConfirmation()
-                    ->modalHeading('Reprocessar Vínculos por Planilha')
-                    ->modalDescription('⚠️ ATENÇÃO: Esta ação vai REMOVER todos os vínculos existentes e criar apenas os vínculos da planilha. Esta operação não pode ser desfeita.')
-                    ->modalSubmitActionLabel('Sim, Reprocessar')
-                    ->form([
-                        Forms\Components\FileUpload::make('planilha')
-                            ->label('Planilha de Vínculos')
-                            ->acceptedFileTypes([
-                                'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-                                'application/vnd.ms-excel'
-                            ])
-                            ->required()
-                            ->helperText('Estrutura: Coluna A (Escola), Coluna B (Nome Professor), Coluna C (Email), Coluna D (Turma)')
-                    ])
-                    ->action(function (array $data) {
-                        try {
-                            $arquivo = storage_path('app/public/' . $data['planilha']);
-                            $spreadsheet = \PhpOffice\PhpSpreadsheet\IOFactory::load($arquivo);
-                            $sheet = $spreadsheet->getActiveSheet();
-                            $rows = $sheet->toArray();
+                    ->modalHeading('Remover Todos os Vínculos')
+                    ->modalDescription('⚠️ ATENÇÃO: Esta ação removerá TODOS os vínculos entre professores e turmas. Esta operação não pode ser desfeita.')
+                    ->modalSubmitActionLabel('Sim, remover tudo')
+                    ->action(function () {
 
-                            $vinculosNovos = [];
-                            $erros = [];
-                            $professoresProcessados = [];
+                        $totalRemovidos = 0;
 
-                            // Processar planilha (pular header)
-                            foreach (array_slice($rows, 1) as $index => $row) {
-                                $linha = $index + 2;
+                        DB::transaction(function () use (&$totalRemovidos) {
 
-                                $escolaNome = isset($row[0]) ? trim($row[0]) : '';
-                                $professorNome = isset($row[1]) ? trim($row[1]) : '';
-                                $email = isset($row[2]) ? strtolower(trim($row[2])) : '';
-                                $turmaNome = isset($row[3]) ? trim($row[3]) : '';
+                            $professores = Professor::withCount('turmas')->get();
 
-                                // Validar dados
-                                if (empty($email) || !filter_var($email, FILTER_VALIDATE_EMAIL)) {
-                                    continue;
-                                }
+                            foreach ($professores as $professor) {
 
-                                if (empty($escolaNome) || empty($turmaNome)) {
-                                    $erros[] = "Linha {$linha}: Dados incompletos";
-                                    continue;
-                                }
-
-                                // Buscar professor
-                                $professor = Professor::whereRaw('LOWER(TRIM(email)) = ?', [$email])->first();
-
-                                if (!$professor) {
-                                    $erros[] = "Linha {$linha}: Professor '{$email}' não encontrado";
-                                    continue;
-                                }
-
-                                // Validar escola do professor
-                                if (!$professor->escola) {
-                                    $erros[] = "Linha {$linha}: Professor '{$email}' sem escola vinculada";
-                                    continue;
-                                }
-
-                                // Verificar se escola corresponde (com busca flexível)
-                                $escolaMatch = false;
-                                if (
-                                    stripos($professor->escola->nome, $escolaNome) !== false ||
-                                    stripos($escolaNome, $professor->escola->nome) !== false
-                                ) {
-                                    $escolaMatch = true;
-                                }
-
-                                if (!$escolaMatch) {
-                                    $erros[] = "Linha {$linha}: Escola não corresponde - Sistema: '{$professor->escola->nome}', Planilha: '{$escolaNome}'";
-                                    continue;
-                                }
-
-                                // Buscar turma na escola do professor
-                                $turmas = \App\Models\Turma::query()
-                                    ->where('escola_id', $professor->escola_id)
-                                    ->where(function ($q) use ($turmaNome) {
-                                        $q->whereRaw('LOWER(nome) LIKE ?', ['%' . strtolower($turmaNome) . '%'])
-                                            ->orWhereHas('serie', function ($sq) use ($turmaNome) {
-                                                $sq->whereRaw('LOWER(nome) LIKE ?', ['%' . strtolower($turmaNome) . '%']);
-                                            });
-                                    })
-                                    ->get();
-
-                                if ($turmas->isEmpty()) {
-                                    $erros[] = "Linha {$linha}: Turma '{$turmaNome}' não encontrada na escola '{$professor->escola->nome}'";
-                                    continue;
-                                }
-
-                                // Guardar vínculos para este professor
-                                if (!isset($vinculosNovos[$professor->id])) {
-                                    $vinculosNovos[$professor->id] = [
-                                        'professor' => $professor,
-                                        'turmas' => []
-                                    ];
-                                }
-
-                                foreach ($turmas as $turma) {
-                                    if (!in_array($turma->id, $vinculosNovos[$professor->id]['turmas'])) {
-                                        $vinculosNovos[$professor->id]['turmas'][] = $turma->id;
-                                    }
-                                }
-
-                                $professoresProcessados[$email] = true;
-                            }
-
-                            // REMOVER TODOS OS VÍNCULOS EXISTENTES E CRIAR OS NOVOS
-                            $totalVinculosRemovidos = 0;
-                            $totalVinculosAdicionados = 0;
-
-                            DB::transaction(function () use ($vinculosNovos, &$totalVinculosRemovidos, &$totalVinculosAdicionados) {
-                                // 1. Remover TODOS os vínculos de professores que estão na planilha
-                                foreach ($vinculosNovos as $professorId => $dados) {
-                                    $professor = $dados['professor'];
-                                    $vinculosAntigos = $professor->turmas()->count();
+                                if ($professor->turmas_count > 0) {
+                                    $totalRemovidos += $professor->turmas_count;
                                     $professor->turmas()->detach();
-                                    $totalVinculosRemovidos += $vinculosAntigos;
-                                }
-
-                                // 2. Criar novos vínculos
-                                foreach ($vinculosNovos as $professorId => $dados) {
-                                    $professor = $dados['professor'];
-                                    $turmasIds = $dados['turmas'];
-
-                                    if (!empty($turmasIds)) {
-                                        $professor->turmas()->attach($turmasIds);
-                                        $totalVinculosAdicionados += count($turmasIds);
-                                    }
-                                }
-                            });
-
-                            @unlink($arquivo);
-
-                            $mensagem = "🔄 REPROCESSAMENTO CONCLUÍDO\n\n";
-                            $mensagem .= "Professores processados: " . count($vinculosNovos) . "\n";
-                            $mensagem .= "❌ Vínculos removidos: {$totalVinculosRemovidos}\n";
-                            $mensagem .= "✅ Vínculos criados: {$totalVinculosAdicionados}\n";
-
-                            if (!empty($erros)) {
-                                $mensagem .= "\n⚠️ ERROS/AVISOS (" . count($erros) . "):\n";
-                                $mensagem .= implode("\n", array_slice($erros, 0, 15));
-                                if (count($erros) > 15) {
-                                    $mensagem .= "\n... +" . (count($erros) - 15) . " mais";
                                 }
                             }
+                        });
 
-                            \Filament\Notifications\Notification::make()
-                                ->title('Vínculos Reprocessados')
-                                ->body($mensagem)
-                                ->success()
-                                ->persistent()
-                                ->send();
-                        } catch (\Exception $e) {
-                            \Filament\Notifications\Notification::make()
-                                ->title('Erro ao Reprocessar')
-                                ->body($e->getMessage())
-                                ->danger()
-                                ->persistent()
-                                ->send();
-                        }
+                        \Filament\Notifications\Notification::make()
+                            ->title('Vínculos Removidos')
+                            ->body("{$totalRemovidos} vínculo(s) removido(s) com sucesso.")
+                            ->success()
+                            ->persistent()
+                            ->send();
                     }),
+
 
                 Tables\Actions\Action::make('vincularPlanilha')
                     ->label('Vincular por Planilha')

@@ -34,6 +34,8 @@ class ProfessorSyncService
     {
         $pageToken = null;
 
+        $classroomUserIds = []; // <- armazenar IDs reais do Classroom
+
         do {
             $response = $classroom->courses_students->listCoursesStudents(
                 $escola->classroom_course_id,
@@ -43,15 +45,18 @@ class ProfessorSyncService
                 ]
             );
 
-            /** @var Student[] $students */
             $students = $response->getStudents() ?? [];
 
             foreach ($students as $student) {
+
                 $profile = $student->getProfile();
+                $userId = $student->getUserId();
+
+                $classroomUserIds[] = $userId;
 
                 Professor::updateOrCreate(
                     [
-                        'classroom_user_id' => $student->getUserId(),
+                        'classroom_user_id' => $userId,
                         'escola_id' => $escola->id,
                     ],
                     [
@@ -64,5 +69,10 @@ class ProfessorSyncService
 
             $pageToken = $response->getNextPageToken();
         } while ($pageToken);
+
+        // 🔥 Remover professores que NÃO estão mais no Classroom
+        Professor::where('escola_id', $escola->id)
+            ->whereNotIn('classroom_user_id', $classroomUserIds)
+            ->delete();
     }
 }
