@@ -217,160 +217,154 @@ class ProfessorResource extends Resource
                             ->helperText('Upload da planilha XLSX com: Coluna A (Escola), Coluna B (Série), Coluna E (Componente), Coluna H (Email)')
                     ])
                     ->action(function (array $data) {
+
                         try {
+
                             $arquivo = storage_path('app/public/' . $data['planilha']);
 
                             $spreadsheet = \PhpOffice\PhpSpreadsheet\IOFactory::load($arquivo);
                             $sheet = $spreadsheet->getActiveSheet();
                             $rows = $sheet->toArray();
 
-                            // Componentes especiais que devem ser tratados pela série
-                            $componentesEspeciais = [
-                                'tracos sons cores e formas',
-                                'tracossonscoreseformas',
-                                'corpo gesto e movimentos',
-                                'corpo gestos e movimentos',
-                                'corpogestosemovimentos',
-                                'educacao fisica',
-                                'educacaofisica',
-                                'historia',
-                                'arte e ensino religioso',
-                                'arteeensinoreligioso'
-                            ];
+                            $series = \App\Models\Serie::all();
+
+                            $seriesMap = $series->mapWithKeys(function ($serie) {
+                                return [
+                                    mb_strtolower(trim($serie->nome)) => $serie->id
+                                ];
+                            });
 
                             $totalVinculos = 0;
                             $erros = [];
-                            $logs = [];
-                            $professoresNaoEncontrados = [];
                             $emailsProcessados = [];
 
+                            $linhasNaoEncontradas = [];
+                            $cabecalho = $rows[0] ?? [];
+
                             foreach ($rows as $index => $row) {
+
+                                if ($index === 0) {
+                                    continue;
+                                }
+
                                 $linha = $index + 1;
 
-                                // Extrair dados
-                                $escolaNome = isset($row[0]) ? trim($row[0]) : '';
-                                $serieNome = isset($row[1]) ? trim($row[1]) : '';
-                                $componente = isset($row[4]) ? trim($row[4]) : '';
-                                $emailBruto = isset($row[7]) ? trim($row[7]) : '';
+                                $escolaNome = trim($row[0] ?? '');
+                                $serieColunaB = trim($row[1] ?? '');
+                                $componente = trim($row[4] ?? '');
+                                $email = mb_strtolower(trim($row[7] ?? ''));
 
-                                // Normalizar email
-                                $email = strtolower($emailBruto);
-
-                                // Validar email
                                 if (empty($email) || !filter_var($email, FILTER_VALIDATE_EMAIL)) {
                                     continue;
                                 }
 
-                                // Evitar processar mesmo email múltiplas vezes na mesma execução
-                                $chaveProcessamento = $email . '|' . $escolaNome . '|' . $serieNome . '|' . $componente;
-                                if (isset($emailsProcessados[$chaveProcessamento])) {
+                                $chave = $email . '|' . $escolaNome . '|' . $serieColunaB . '|' . $componente;
+                                if (isset($emailsProcessados[$chave])) {
                                     continue;
                                 }
-                                $emailsProcessados[$chaveProcessamento] = true;
+                                $emailsProcessados[$chave] = true;
 
-                                // Buscar professor (com normalização)
                                 $professor = Professor::whereRaw('LOWER(TRIM(email)) = ?', [$email])->first();
 
                                 if (!$professor) {
-                                    if (!in_array($email, $professoresNaoEncontrados)) {
-                                        $professoresNaoEncontrados[] = $email;
-                                    }
+                                    $linhasNaoEncontradas[] = $row; // guarda linha completa
                                     continue;
                                 }
 
-                                // Verificar escola do professor
-                                if (!$professor->escola) {
-                                    $erros[] = "Linha {$linha}: Professor '{$email}' sem escola vinculada";
+                                if (!$professor->escola_id) {
+                                    $erros[] = "Linha {$linha}: Professor sem escola vinculada";
                                     continue;
                                 }
 
-                                // Verificar se escola da planilha corresponde
-                                if (!empty($escolaNome) && stripos($professor->escola->nome, $escolaNome) === false) {
-                                    $erros[] = "Linha {$linha}: Escola não corresponde - Professor em '{$professor->escola->nome}', planilha '{$escolaNome}'";
+                                $componenteKey = mb_strtolower($componente);
+                                $serieKeyB = mb_strtolower($serieColunaB);
+
+                                $serieId = null;
+
+                                if (isset($seriesMap[$componenteKey])) {
+                                    $serieId = $seriesMap[$componenteKey];
+                                } elseif (isset($seriesMap[$serieKeyB])) {
+                                    $serieId = $seriesMap[$serieKeyB];
+                                }
+
+                                if (!$serieId) {
                                     continue;
                                 }
 
-                                // Normalizar componente
-                                $componenteNormalizado = strtolower(preg_replace('/[^a-z0-9\s]/ui', '', $componente));
-
-                                // Verificar se é componente especial
-                                $isComponenteEspecial = false;
-                                foreach ($componentesEspeciais as $especial) {
-                                    $especial = str_replace(' ', '', $especial);
-                                    $componenteTest = str_replace(' ', '', $componenteNormalizado);
-                                    if (str_contains($componenteTest, $especial) || str_contains($especial, $componenteTest)) {
-                                        $isComponenteEspecial = true;
-                                        break;
-                                    }
-                                }
-
-                                // Buscar turma
-                                if ($isComponenteEspecial) {
-                                    // Para componentes especiais: buscar pela série (relacionamento)
-                                    $turmas = \App\Models\Turma::query()
-                                        ->where('escola_id', $professor->escola_id)
-                                        ->whereHas('serie', function ($q) use ($serieNome) {
-                                            $q->whereRaw('LOWER(nome) LIKE ?', ['%' . strtolower($serieNome) . '%']);
-                                        })
-                                        ->get();
-                                } else {
-                                    // Para outros: buscar pelo nome da turma que contenha a série
-                                    $turmas = \App\Models\Turma::query()
-                                        ->where('escola_id', $professor->escola_id)
-                                        ->whereRaw('LOWER(nome) LIKE ?', ['%' . strtolower($serieNome) . '%'])
-                                        ->get();
-                                }
+                                $turmas = \App\Models\Turma::query()
+                                    ->where('escola_id', $professor->escola_id)
+                                    ->where('serie_id', $serieId)
+                                    ->get();
 
                                 if ($turmas->isEmpty()) {
-                                    $tipo = $isComponenteEspecial ? 'especial' : 'normal';
-                                    $erros[] = "Linha {$linha}: Turma não encontrada [{$tipo}] (Escola: {$professor->escola->nome}, Série: {$serieNome})";
+                                    $erros[] = "Linha {$linha}: Nenhuma turma encontrada para série";
                                     continue;
                                 }
 
-                                // Vincular
-                                $vinculosRealizados = 0;
-                                foreach ($turmas as $turma) {
-                                    if (!$professor->turmas->contains($turma->id)) {
-                                        $professor->turmas()->attach($turma->id);
-                                        $vinculosRealizados++;
-                                    }
-                                }
+                                $ids = $turmas->pluck('id')->toArray();
 
-                                if ($vinculosRealizados > 0) {
-                                    $totalVinculos += $vinculosRealizados;
-                                    $logs[] = "✓ {$email} -> {$turmas->pluck('nome')->implode(', ')}";
-                                }
+                                $antes = $professor->turmas()->count();
+
+                                $professor->turmas()->syncWithoutDetaching($ids);
+
+                                $depois = $professor->turmas()->count();
+
+                                $totalVinculos += max(0, $depois - $antes);
                             }
 
                             @unlink($arquivo);
 
-                            $mensagem = "🎯 {$totalVinculos} vínculo(s) realizado(s)";
+                            // 🔥 Se houver professores não encontrados, gera planilha
+                            $downloadUrl = null;
 
-                            if (!empty($professoresNaoEncontrados)) {
-                                $mensagem .= "\n\n⚠️ PROFESSORES NÃO ENCONTRADOS NO SISTEMA ({count($professoresNaoEncontrados)}):\n";
-                                $mensagem .= implode("\n", array_slice($professoresNaoEncontrados, 0, 15));
-                                if (count($professoresNaoEncontrados) > 15) {
-                                    $mensagem .= "\n... +" . (count($professoresNaoEncontrados) - 15) . " mais";
+                            if (!empty($linhasNaoEncontradas)) {
+
+                                $novoSpreadsheet = new \PhpOffice\PhpSpreadsheet\Spreadsheet();
+                                $novaSheet = $novoSpreadsheet->getActiveSheet();
+
+                                // Cabeçalho
+                                $novaSheet->fromArray($cabecalho, null, 'A1');
+
+                                // Linhas filtradas
+                                $novaSheet->fromArray($linhasNaoEncontradas, null, 'A2');
+
+                                foreach (range('A', $novaSheet->getHighestColumn()) as $col) {
+                                    $novaSheet->getColumnDimension($col)->setAutoSize(true);
                                 }
+
+                                $fileName = 'professores_nao_encontrados_' . date('Y-m-d_His') . '.xlsx';
+                                $dir = storage_path('app/public/exports');
+
+                                if (!file_exists($dir)) {
+                                    mkdir($dir, 0755, true);
+                                }
+
+                                $filePath = $dir . '/' . $fileName;
+
+                                $writer = new \PhpOffice\PhpSpreadsheet\Writer\Xlsx($novoSpreadsheet);
+                                $writer->save($filePath);
+
+                                $downloadUrl = asset('storage/exports/' . $fileName);
                             }
 
-                            if (!empty($logs)) {
-                                $mensagem .= "\n\n✅ VÍNCULOS REALIZADOS:\n" . implode("\n", array_slice($logs, 0, 10));
-                                if (count($logs) > 10) $mensagem .= "\n... +" . (count($logs) - 10) . " mais";
-                            }
-
-                            if (!empty($erros)) {
-                                $mensagem .= "\n\n❌ OUTROS ERROS:\n" . implode("\n", array_slice($erros, 0, 5));
-                                if (count($erros) > 5) $mensagem .= "\n... +" . (count($erros) - 5) . " mais";
-                            }
-
-                            \Filament\Notifications\Notification::make()
-                                ->title($totalVinculos > 0 ? 'Concluído com Sucesso' : 'Nenhum Vínculo Realizado')
-                                ->body($mensagem)
+                            $notification = \Filament\Notifications\Notification::make()
+                                ->title('Processamento concluído')
+                                ->body("Vínculos realizados: {$totalVinculos}")
                                 ->status($totalVinculos > 0 ? 'success' : 'warning')
-                                ->persistent()
-                                ->send();
+                                ->persistent();
+
+                            if ($downloadUrl) {
+                                $notification->actions([
+                                    \Filament\Notifications\Actions\Action::make('download')
+                                        ->label('Baixar não encontrados')
+                                        ->url($downloadUrl)
+                                        ->openUrlInNewTab()
+                                ]);
+                            }
+
+                            $notification->send();
                         } catch (\Exception $e) {
+
                             \Filament\Notifications\Notification::make()
                                 ->title('Erro')
                                 ->body($e->getMessage())
