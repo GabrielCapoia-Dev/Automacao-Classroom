@@ -68,23 +68,38 @@ class ProfessorResource extends Resource
         }
 
         return $table
-            ->description(function () {
-                $escolas = \App\Models\Escola::count();
-                $professores = Professor::count();
+            ->description(function ($livewire) {
 
-                return "Escolas: {$escolas} | Professores: {$professores}";
+                $escolas = \App\Models\Escola::count();
+                $totalProfessores = Professor::count();
+
+                // quantidade após filtros/pesquisa
+                $listagemAtual = $livewire->getFilteredTableQuery()->count();
+
+                return "Escolas: {$escolas} | Professores: {$totalProfessores} | Listagem Atual: {$listagemAtual}";
             })
-            ->modifyQueryUsing(function (Builder $query) use ($series) {
+            ->modifyQueryUsing(function (Builder $query, $livewire) use ($series) {
 
                 foreach ($series as $serie) {
 
                     $alias = 'serie_' . $serie->id;
 
-                    $query->withCount([
+                    // adiciona withExists para todas
+                    $query->withExists([
                         "turmas as {$alias}" => function ($q) use ($serie) {
                             $q->where('serie_id', $serie->id);
                         }
                     ]);
+
+                    // se a coluna estiver visível, filtra apenas TRUE
+                    if (
+                        isset($livewire->toggledTableColumns[$alias]) &&
+                        $livewire->toggledTableColumns[$alias] === true
+                    ) {
+                        $query->whereHas('turmas', function ($q) use ($serie) {
+                            $q->where('serie_id', $serie->id);
+                        });
+                    }
                 }
             })
             ->columns(array_merge([
