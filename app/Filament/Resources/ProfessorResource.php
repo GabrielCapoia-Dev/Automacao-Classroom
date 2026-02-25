@@ -472,6 +472,13 @@ class ProfessorResource extends Resource
                     }),
             ])
             ->bulkActions([
+
+                Tables\Actions\DeleteBulkAction::make()
+                    ->label('Excluir selecionados')
+                    ->color('danger')
+                    ->requiresConfirmation()
+                    ->icon('heroicon-o-trash'),
+
                 Tables\Actions\BulkAction::make('vincularTurmas')
                     ->label('Vincular')
                     ->icon('heroicon-o-link')

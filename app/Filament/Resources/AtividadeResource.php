@@ -443,104 +443,68 @@ class AtividadeResource extends Resource
                     ->modalDescription('⚠️ Esta ação vai sincronizar os professores de TODAS as atividades com base nos vínculos atuais das turmas no SISTEMA (banco de dados). Esta operação pode levar vários minutos.')
                     ->modalSubmitActionLabel('Sim, Reajustar Todas')
                     ->action(function () {
+
                         try {
+
+                            $editService = new \App\Services\Atividade\AtividadeEditService(
+                                app(\App\Services\GoogleMainService::class)
+                            );
+
                             $atividadesPrincipais = \App\Models\Atividade::apenasAtividadesPrincipais()->get();
 
-                            $totalAdicionados = 0;
-                            $totalRemovidos = 0;
-                            $totalAtividades = 0;
-                            $detalhes = [];
+                            $totalAtualizadas = 0;
 
                             DB::beginTransaction();
 
                             foreach ($atividadesPrincipais as $atividadePrincipal) {
+
                                 $todasAsPartes = $atividadePrincipal->todasAsPartes();
 
                                 foreach ($todasAsPartes as $parte) {
-                                    // Refresh para garantir dados atualizados
-                                    $parte->load(['escolas', 'professores', 'serie']);
 
-                                    // Calcular professores corretos baseados nos vínculos de turma
-                                    $professoresCorretos = \App\Models\Professor::query()
-                                        ->whereIn('escola_id', $parte->escolas->pluck('id')->toArray())
-                                        ->whereHas('turmas', function ($q) use ($parte) {
-                                            $q->where('serie_id', $parte->serie_id);
-                                        })
-                                        ->whereNotNull('classroom_user_id')
-                                        ->pluck('id')
-                                        ->toArray();
+                                    $parte->load(['escolas', 'serie']);
 
-                                    // Professores que atualmente têm acesso
-                                    $professoresAtuais = DB::table('atividade_professor')
-                                        ->where('atividade_id', $parte->id)
-                                        ->pluck('professor_id')
-                                        ->toArray();
+                                    foreach ($parte->escolas as $escola) {
 
-                                    $paraAdicionar = array_diff($professoresCorretos, $professoresAtuais);
-                                    $paraRemover = array_diff($professoresAtuais, $professoresCorretos);
+                                        // Professores corretos baseados nas turmas atuais
+                                        $professoresCorretos = \App\Models\Professor::query()
+                                            ->where('escola_id', $escola->id)
+                                            ->whereHas('turmas', function ($q) use ($parte) {
+                                                $q->where('serie_id', $parte->serie_id);
+                                            })
+                                            ->whereNotNull('classroom_user_id')
+                                            ->pluck('id')
+                                            ->toArray();
 
+                                        // Atualiza banco
+                                        $parte->professores()->syncWithoutDetaching($professoresCorretos);
 
-                                    // REMOVER professores que não deveriam ter acesso
-                                    if (!empty($paraRemover)) {
-                                        $removidos = DB::table('atividade_professor')
-                                            ->where('atividade_id', $parte->id)
-                                            ->whereIn('professor_id', $paraRemover)
-                                            ->delete();
+                                        // 🔥 Atualiza GOOGLE CLASSROOM
+                                        $editService->atualizarAtividade($parte, [
+                                            'editar_todas_escolas_existentes' => true,
+                                            'professores_ids' => $professoresCorretos,
+                                        ]);
 
-                                        $totalRemovidos += $removidos;
-                                        $detalhes[] = "📝 {$parte->titulo} (ID {$parte->id}): removeu {$removidos}";
+                                        $totalAtualizadas++;
                                     }
-
-                                    // ADICIONAR professores que deveriam ter acesso
-                                    if (!empty($paraAdicionar)) {
-                                        $dados = [];
-                                        $now = now();
-                                        foreach ($paraAdicionar as $professorId) {
-                                            $dados[] = [
-                                                'atividade_id' => $parte->id,
-                                                'professor_id' => $professorId,
-                                                'created_at' => $now,
-                                                'updated_at' => $now,
-                                            ];
-                                        }
-                                        DB::table('atividade_professor')->insert($dados);
-
-                                        $totalAdicionados += count($paraAdicionar);
-                                        $detalhes[] = "📝 {$parte->titulo} (ID {$parte->id}): adicionou " . count($paraAdicionar);
-                                    }
-
-                                    $totalAtividades++;
                                 }
                             }
 
                             DB::commit();
 
-                            $mensagem = "✅ {$totalAdicionados} professor(es) ADICIONADO(S) ao sistema\n" .
-                                "❌ {$totalRemovidos} professor(es) REMOVIDO(S) do sistema\n" .
-                                "📊 {$totalAtividades} atividade(s) processada(s)";
-
-                            if (count($detalhes) > 0) {
-                                $mensagem .= "\n\n📋 DETALHES:\n" . implode("\n", array_slice($detalhes, 0, 15));
-                                if (count($detalhes) > 15) {
-                                    $mensagem .= "\n... e mais " . (count($detalhes) - 15) . " atividades";
-                                }
-                            } else {
-                                $mensagem .= "\n\n✓ Nenhuma mudança necessária - todos os vínculos já estavam corretos!";
-                            }
-
                             \Filament\Notifications\Notification::make()
-                                ->title('Reajuste Concluído')
-                                ->body($mensagem)
+                                ->title('Reajuste completo')
+                                ->body("{$totalAtualizadas} atividades sincronizadas com o Classroom")
                                 ->success()
                                 ->persistent()
                                 ->send();
-                        } catch (\Exception $e) {
+                        } catch (\Throwable $e) {
+
                             DB::rollBack();
 
-
                             \Filament\Notifications\Notification::make()
-                                ->title('Erro ao Reajustar')
-                                ->body("Erro: {$e->getMessage()}\nVerifique os logs para mais detalhes.")
+                                ->title('Erro ao sincronizar')
+                                ->body($e->getMessage())
                                 ->danger()
                                 ->persistent()
                                 ->send();
@@ -854,7 +818,14 @@ class AtividadeResource extends Resource
                         }
                     }),
             ])
-            ->bulkActions([])
+            ->bulkActions([
+
+                Tables\Actions\DeleteBulkAction::make()
+                    ->label('Excluir selecionados')
+                    ->color('danger')
+                    ->requiresConfirmation()
+                    ->icon('heroicon-o-trash'),
+            ])
             ->defaultSort('created_at', 'desc');
     }
 

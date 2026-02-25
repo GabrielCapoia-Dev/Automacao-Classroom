@@ -18,7 +18,10 @@ class ManageProfessors extends ManageRecords
             Actions\Action::make('importar')
                 ->label('Importar')
                 ->action(function () {
-                    app(ProfessorSyncService::class)->syncProfessores();
+                    $service = app(ProfessorSyncService::class);
+
+                    $service->syncProfessores();
+                    $service->sincronizarVinculoProfessorTurma();
 
                     Notification::make()
                         ->title('Sincronização concluída')
